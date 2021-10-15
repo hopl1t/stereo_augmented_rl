@@ -126,7 +126,7 @@ class A2CAgent:
                         if log_interval and (episode % log_interval == 0) and (episode != 0):
                             utils.log(self)
                         if eval_interval: # % 0 not allowed
-                            if episode % eval_interval == 0:
+                            if ((episode % eval_interval)  == 0 ) and (episode != 0):
                                 _, all_episode_rewards, completed_levels = utils.evaluate(self, 100, render=False)
                                 utils.print_eval(all_episode_rewards, completed_levels)
                                 if np.mean(all_episode_rewards) >= 200:
