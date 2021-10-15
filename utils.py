@@ -1,15 +1,14 @@
-import gym
 from enum import Enum
 import time
 import multiprocessing as mp
 import torch
-import math
-from torch.distributions import Categorical, Normal
+from torch.distributions import Categorical
 import numpy as np
 import sys
 import pickle
-import gym_sokoban # Don't remove this
+# import gym_sokoban # Don't remove this
 import gym
+import retro
 import random
 import os
 import torch.nn.functional as F
@@ -27,17 +26,17 @@ class ObsType(Enum):
 
 
 class ActionType(Enum):
-    PUSH_TWICE_WAIT = 1
+    ACT_WAIT = 1
     FREE = 2
     NO_WAIT = 3
 
 
 class MoveType(Enum):
-    UP = 1
-    LEFT = 2
-    RIGHT = 3
-    BUTTON = 4
-    NONE = 9
+    UP = 0
+    LEFT = 1
+    RIGHT = 2
+    BUTTON = 3
+    NONE = 4
 
 
 class PERDataLoader(torch.utils.data.DataLoader):
@@ -63,11 +62,44 @@ class PERDataLoader(torch.utils.data.DataLoader):
         return len(self.exp)
 
 
+class Discretizer(gym.ActionWrapper):
+    """
+    Wrap a gym environment and make it use discrete actions.
+    based on https://github.com/openai/retro-baselines/blob/master/agents/sonic_util.py
+    Args:
+        combos: ordered list of lists of valid button combinations
+    """
+    def __init__(self, env, combos):
+        super().__init__(env)
+        assert isinstance(env.action_space, gym.spaces.MultiBinary)
+        buttons = env.unwrapped.buttons
+        self._decode_discrete_action = []
+        for combo in combos:
+            arr = np.array([False] * env.action_space.n)
+            for button in combo:
+                arr[buttons.index(button)] = True
+            self._decode_discrete_action.append(arr)
+        self.action_space = gym.spaces.Discrete(len(self._decode_discrete_action))
+
+    def action(self, act):
+        return self._decode_discrete_action[act].copy().astype(np.int8)
+
+    def reverse_action(self, action):
+        raise NotImplementedError
+
+
 def kill_process(p):
     if p.is_alive():
         p.q.cancel_join_thread()
         p.kill()
         p.join(1)
+
+
+def get_health_score(tens, ones):
+    """
+    Fixes the wired way variables are saved in Skeleton plus's memory
+    """
+    return (((tens - 47) // 5) * 10) + ((ones - 47) // 5)
 
 
 def init_weights(model):
@@ -100,10 +132,10 @@ def print_stats(agent, episode, print_interval, steps_count=0):
     sys.stdout.write(
         "eps: {}, stats for last {} eps:\tavg eps reward: {:.3f}\t\tavg eps step reward: {:.3f}\t\t"
         "avg eps length: {:.3f}\t avg time: {:.3f}\n"
-            .format(episode, print_interval, np.mean(agent.all_rewards[-print_interval:]),
-                    np.sum(agent.all_rewards[-print_interval:]) / steps_count,
-                    np.mean(agent.all_lengths[-print_interval:]) + 1,
-                    np.mean(agent.all_times[-print_interval:])))
+        .format(episode, print_interval, np.mean(agent.all_rewards[-print_interval:]),
+                np.sum(agent.all_rewards[-print_interval:]) / steps_count,
+                np.mean(agent.all_lengths[-print_interval:]) + 1,
+                np.mean(agent.all_times[-print_interval:])))
 
 
 def print_eval(all_episode_rewards, completed_levels):
@@ -117,7 +149,7 @@ def evaluate(agent, num_episodes=1, render=True):
     agent.model.eval()
     all_rewards = []
     all_episode_rewards = []
-    completed_sokoban_levels = 0
+    completed_levels = 0
     for epispode in range(num_episodes):
         if render:
             sys.stdout.write('Saving render video to {}\n'.format(os.path.join(os.getcwd(), 'video')))
@@ -127,18 +159,18 @@ def evaluate(agent, num_episodes=1, render=True):
         done = False
         while not done:
             with torch.no_grad():
+                level = agent.env.score // 10
                 action = agent.act(obs)
                 obs, reward, done, info = agent.env.step(action, is_eval=True)
-            if 'all_boxes_on_target' in info.keys():
-                if info['all_boxes_on_target']:
-                    completed_sokoban_levels += 1
+            if (agent.env.score // 10) > level:
+                    completed_levels += 1
             all_rewards.append(reward)
             episode_rewards.append(reward)
         all_episode_rewards.append(np.sum(episode_rewards))
     if render:
         agent.env.env.close()
     agent.model.train()
-    return all_rewards, all_episode_rewards, completed_sokoban_levels
+    return all_rewards, all_episode_rewards, completed_levels
 
 
 class EnvWrapper:
@@ -146,162 +178,100 @@ class EnvWrapper:
     Wrapps a Sokoban gym environment s.t. we can use the room_state property instead of regular state
     """
 
-    def __init__(self, env_name, obs_type=ObsType.VIDEO_ONLY, action_type=ActionType.PUSH_TWICE_WAIT,
-                 max_steps=5000, compression_rate=4, **kwargs):
+    def __init__(self, env_name, obs_type=ObsType.VIDEO_ONLY, action_type=ActionType.ACT_WAIT,
+                 max_steps=5000, compression_rate=4, kill_hp_ratio=0.05, **kwargs):
         """
         Wraps a gym environment s.t. you can control it's input and output
         :param env_name: str, The environments name
         :param obs_type: ObsType, type of output for environment's observations
         :param compression_rate: video compression rate
         :param args: Any args you want to pass to make()
+        :param kill_hp_ratio: float. way to compute the cost of each hp in the reward as a function of
+         how many kill I expect. Example 5 kills / 100 hp = 0.05
         :param kwargs: Any kwargs you want to pass to make()
         """
         self.obs_type = obs_type
-        self.env = gym.make(env_name)
+        self.env = retro.make(game=env_name, inttype=retro.data.Integrations.ALL)  # 'skeleton_plus'
         self.env_name = env_name
         self.env.max_steps = max_steps
         self.max_steps = max_steps
         self.action_type = action_type
         self.compression_rate = compression_rate
+        self.discretisizer = Discretizer(self.env, [['UP'], ['LEFT'], ['RIGHT'], ['BUTTON'], [None]])
+        self.health = 99
+        self.score = 0
+        self.kill_hp_ratio = kill_hp_ratio
         if obs_type == ObsType.VIDEO_ONLY:
-            screen_size = self.env.observation_space[:, :, 0][::4, ::4].shape
-            self.obs_size = screen_size[0] * screen_size[1]
-        elif obs_type == ObsType.ROOM_STATE_VECTOR:
-            self.obs_size = self.env.room_state.shape[0] ** 2
+            obs_shape = self.env.observation_space.shape
+            self.obs_size = (int(np.ceil(obs_shape[0] / self.compression_rate))) * \
+                            (int(np.ceil(obs_shape[1] / self.compression_rate)))
         elif obs_type == ObsType.VIDEO_NO_CLUE:
             raise NotImplementedError
         elif obs_type == ObsType.VIDEO_MONO:
             raise NotImplementedError
         elif obs_type == ObsType.VIDEO_STEREO:
             raise NotImplementedError
-        if action_type == ActionType.REGULAR:
-            self.num_actions = self.env.action_space.n
-        elif action_type == ActionType.PUSH_ONLY:
-            self.num_actions = 4
-        elif action_type == ActionType.PUSH_PULL:
-            self.num_actions = 8
-        elif action_type == ActionType.GAUSSIAN:
-            self.num_actions = self.env.action_space.shape[0]
-        elif action_type == ActionType.DISCRETIZIED:
-            self.num_actions = self.env.action_space.shape[0]
-            self.num_discrete = kwargs['num_discrete']
-            # specially taylored to this game
-            if self.env_name == 'LunarLanderContinuous-v2':
-                assert self.num_discrete % 2
-                low_main = 0
-                high_main = 1
-                low_sides = -1
-                middle_sides = 0.5
-                high_sides = 1
-                self.discrete_array = torch.cat([torch.tensor([-1]),
-                                     torch.flip(torch.linspace(high_main, low_main, self.num_discrete - 1), dims=[0])])
-                a = torch.linspace(low_sides, -middle_sides, self.num_discrete // 2)
-                b = torch.cat([torch.tensor([0]), torch.flip(
-                                     torch.linspace(high_sides, middle_sides, self.num_discrete // 2), dims=[0])])
-                self.split_discrete_array = torch.cat((a, b))
-            else:
-                low = self.env.action_space.low[0].item()
-                high = self.env.action_space.high[0].item()
-                self.discrete_array = torch.arange(low, high, (high - low) / self.num_discrete)
-                a = torch.arange(low, low / 2, (-low / 2) / (self.num_discrete // 2))
-                b = torch.arange(high / 2, high, (high / 2) / (self.num_discrete // 2))
-                self.split_discrete_array = torch.cat((a, b)) # in Lunar lander -0.5 to 0.5 is NOP for L\R engines
-        elif action_type == ActionType.FIXED_LUNAR:
-            self.num_actions = len(FIXED_ACTIONS)
+        if action_type == ActionType.ACT_WAIT:
+            self.num_actions = len(MoveType)
+            # self.env.action_space.n
+        elif action_type == ActionType.FREE:
+            raise NotImplementedError
+        elif action_type == ActionType.NO_WAIT:
+            raise NotImplementedError
 
     def reset(self):
         obs = self.env.reset()
+        self.health = 99
+        self.score = 0
         return self.process_obs(obs)
 
     def step(self, action, is_eval=False):
-        if self.action_type in [ActionType.REGULAR, ActionType.FIXED_LUNAR]:
-            pass # No change if action type is regular
-        elif self.action_type == ActionType.PUSH_ONLY:
-            # maps from 0-3 to 1-4 since 0 is NOP
-            action += 1
-        elif self.action_type == ActionType.PUSH_PULL:
-            # maps from 0-7 to [1,2,3,4,9,10,11,12]
-            action += 1
-            if action >= 5:
-                action += 4
-        elif self.action_type == ActionType.GAUSSIAN:
-            action = action.cpu().numpy()
-        elif self.action_type == ActionType.DISCRETIZIED:
-            action = action.flatten().numpy()
-        obs, reward, done, info = self.env.step(action)
+        if self.action_type == ActionType.ACT_WAIT:
+            _, reward1, done1, _ = self.env.step(self.discretisizer.action(action))
+            obs, reward2, done2, info = self.env.step(self.discretisizer.action(MoveType.NONE.value))
+            reward = reward1 + reward2
+            done = done1 | done2
+        else:
+            raise NotImplementedError
         obs = self.process_obs(obs)
-        info['used_trick'] = False
-        if self.cone_trick and not is_eval:
-            x_pos = obs[0]
-            y_pos = obs[1]
-            alpha = math.atan2(y_pos, abs(x_pos))
-            if (alpha < math.pi / 4) and (y_pos > 1/3):
-                reward -= self.trick_fine
-                done = True
-                info['used_trick'] = True
-        if self.move_trick and not is_eval:
-            # Don't penalize for regular steps when using move trick
-            if reward == -0.1:
-                reward = 0
-            room = self.env.room_state
-            player_pos = self.env.player_position
-            is_valid = is_valid_command(room, player_pos, MoveType(action))
-            if not is_valid:
-                reward -= self.trick_fine
-                done = True
-                info['used_trick'] = True
+        if self.env_name == 'skeleton_plus':
+            health = get_health_score(info['health_tens'], info['health_ones'])
+            score = get_health_score(info['score_tens'], info['score_ones'])
+            health_delta = self.health - health
+            score_delta = score - self.score
+            # TODO: removes these asserts once we know the program runs smoothly
+            assert health_delta >= 0
+            assert score_delta >= 0
+            self.health = health
+            self.score = score
+            reward = score_delta - (self.kill_hp_ratio * health_delta)
+            # TODO: consider adding manual done condition here
+            # done =
         return obs, reward, done, info
 
     def process_obs(self, obs):
-        if (self.obs_type == ObsType.REGULAR) or (self.obs_type == ObsType.BOX2D):
-            return obs
-        elif self.obs_type == ObsType.ROOM_STATE_VECTOR:
-            return self.env.room_state.flatten()
-        elif self.obs_type == ObsType.ROOM_STATE_MATRIX:
-            return self.env.room_state
+        if self.obs_type == ObsType.VIDEO_ONLY:
+            obs = obs[:, :, 0][::self.compression_rate, ::self.compression_rate].flatten()
+        elif self.obs_type == ObsType.VIDEO_NO_CLUE:
+            raise NotImplementedError
+        elif self.obs_type == ObsType.VIDEO_MONO:
+            raise NotImplementedError
+        elif self.obs_type == ObsType.VIDEO_STEREO:
+            raise NotImplementedError
+        return obs
 
-    def process_action(self, dist, policy_dist, is_eval=False):
-        if self.action_type == ActionType.GAUSSIAN:
-            if is_eval:
-                raise NotImplementedError
-            detached_mu = dist[0]
-            detached_sigma = dist[1]
-            attached_mu = policy_dist[0]
-            attached_sigma = policy_dist[1]
-            action = reparametrize(attached_mu, attached_sigma).squeeze(0).squeeze(0)
-            action_dist = Normal(detached_mu, detached_sigma)
-            log_prob = torch.log(torch.sigmoid((torch.abs(action - detached_mu)) / detached_sigma))
-            entropy = action_dist.entropy().detach().sum()
-            action = action.detach()
-        elif self.action_type == ActionType.DISCRETIZIED:
-            if is_eval:
-                action_idx = torch.argmax(dist, 1).view(-1,1)
-            else:
-                action_idx = torch.multinomial(dist, 1)
-            if self.env_name == 'LunarLanderContinuous-v2':
-                action = torch.stack((self.discrete_array[action_idx[0]], self.split_discrete_array[action_idx[1]]))
-            else:
-                action = self.discrete_array[action_idx]
-            log_prob = torch.log(torch.gather(policy_dist, 1, action_idx).squeeze(1))
-            entropy = Categorical(probs=dist).entropy().sum()
-        elif self.action_type == ActionType.FIXED_LUNAR:
-            if is_eval:
-                action_idx = torch.argmax(dist, -1).item()
-            else:
-                action_idx = torch.multinomial(dist, 1).item()
-            action = FIXED_ACTIONS[action_idx]
-            log_prob = torch.log(policy_dist[action_idx])
-            entropy = Categorical(probs=dist).entropy()
+    @staticmethod
+    def process_action(dist, policy_dist, is_eval=False):
+        if is_eval:
+            action = torch.argmax(dist, -1).item()
         else:
-            if is_eval:
-                action = torch.argmax(dist, -1).item()
-            else:
-                action = torch.multinomial(dist, 1).item()
-            log_prob = torch.log(policy_dist[action])
-            entropy = Categorical(probs=dist).entropy()
+            action = torch.multinomial(dist, 1).item()
+        log_prob = torch.log(policy_dist[action])
+        entropy = Categorical(probs=dist).entropy()
         return action, log_prob, entropy
 
-    def on_policy(self, q_vals, eps=0, is_eval=False):
+    @staticmethod
+    def on_policy(q_vals, eps=0, is_eval=False):
         """
         Returns on policy (epsilon soft or greedy) action for a DQN net
         Returns epsilon soft by default. If eps is specified will return epsilon greedy
@@ -320,18 +290,7 @@ class EnvWrapper:
         else: # epsilon soft option
             activated = F.softmax(q_vals, dim=1)
             action_idx = torch.multinomial(activated, 1)
-
-        if self.action_type == ActionType.REGULAR:
-            action = action_idx.item()
-        elif self.action_type == ActionType.DISCRETIZIED:
-            if self.env_name == 'LunarLanderContinuous-v2': # use special discrete arrays
-                action = torch.stack((self.discrete_array[action_idx[0]], self.split_discrete_array[action_idx[1]]))
-            else:
-                action = self.discrete_array[action_idx]
-        elif self.action_type == ActionType.FIXED_LUNAR:
-            action = FIXED_ACTIONS[action_idx]
-        else:
-            raise NotImplementedError
+        action = action_idx.item()
         return action, action_idx
 
     def off_policy(self, q_vals):
@@ -340,15 +299,10 @@ class EnvWrapper:
         :param q_vals: Tensor - q values per action
         :return: Int - action to take
         """
-        if self.action_type in [ActionType.REGULAR, ActionType.FIXED_LUNAR]:
-            if q_vals.dim() > 1:
-                q_val, _ = q_vals.max(dim=-1)
-            else:
-                q_val = q_vals.max()
-        elif self.action_type == ActionType.DISCRETIZIED:
-            q_val, _ = q_vals.max(dim=1) # this is actually q_vals
+        if q_vals.dim() > 1:
+            q_val, _ = q_vals.max(dim=-1)
         else:
-            raise NotImplementedError
+            q_val = q_vals.max()
         return q_val
 
 
