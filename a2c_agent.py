@@ -30,7 +30,7 @@ class A2CAgent:
 
     def train(self, epochs: int, trajectory_len: int, env_gen: utils.AsyncEnvGen, lr=1e-4,
               discount_gamma=0.99, scheduler_gamma=0.98, beta=1e-3, print_interval=1000, log_interval=1000,
-              save_interval=10000, scheduler_interval=1000, clip_gradient=False, stop_trick_at=0, no_cuda=False,
+              save_interval=10000, scheduler_interval=1000, clip_gradient=False, no_cuda=False,
               eval_interval=0, **kwargs):
         """
         Trains the model
@@ -54,7 +54,6 @@ class A2CAgent:
         self.model.train()
         optimizer = optim.Adam(self.model.parameters(), lr=lr)
         scheduler = lr_scheduler.ExponentialLR(optimizer, gamma=scheduler_gamma)
-        tricks_used = 0
         steps_count = 0
 
         for episode in range(epochs):
@@ -63,11 +62,6 @@ class A2CAgent:
             state, self.env = env_gen.get_reset_env()
             traj_log_probs, traj_values, traj_rewards = [], [], []
             traj_entropy_term = torch.zeros(1).to(device)
-            if stop_trick_at and episode >= stop_trick_at:
-                self.env.cone_trick = False
-                self.env.move_trick = False
-                if episode == stop_trick_at:
-                    sys.stdout.write('Stopped using trick\n')
 
             for step in range(self.env.max_steps):
                 steps_count += 1
@@ -78,8 +72,6 @@ class A2CAgent:
                 new_state, reward, done, info = self.env.step(action)
                 if step == self.env.max_steps - 1:
                     done = True
-                if info['used_trick']:
-                    tricks_used += 1
                 traj_rewards.append(reward)
                 episode_rewards.append(reward)
                 traj_values.append(value)
@@ -124,8 +116,7 @@ class A2CAgent:
                             utils.save_agent(self)
                             return
                         if (episode % print_interval == 0) and episode != 0:
-                            utils.print_stats(self, episode, print_interval, tricks_used, steps_count)
-                            tricks_used = 0
+                            utils.print_stats(self, episode, print_interval, steps_count)
                             steps_count = 0
                         if (episode % scheduler_interval == 0) and (episode != 0):
                             scheduler.step()
@@ -136,8 +127,8 @@ class A2CAgent:
                             utils.log(self)
                         if eval_interval: # % 0 not allowed
                             if episode % eval_interval == 0:
-                                _, all_episode_rewards, completed_sokoban_levels = utils.evaluate(self, 100, render=False)
-                                utils.print_eval(all_episode_rewards, completed_sokoban_levels)
+                                _, all_episode_rewards, completed_levels = utils.evaluate(self, 100, render=False)
+                                utils.print_eval(all_episode_rewards, completed_levels)
                                 if np.mean(all_episode_rewards) >= 200:
                                     sys.stdout.write('{0} episode {1}, Last 100 eval episodes averaged 200 points {0}\n'
                                                      .format('*' * 10, episode))

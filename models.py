@@ -32,7 +32,6 @@ class CommonActorCritic(nn.Module):
     """
     def __init__(self, num_inputs, num_actions, hidden_size=512, device=torch.device('cpu'), **kwargs):
         super(CommonActorCritic, self).__init__()
-
         self.num_actions = num_actions
         self.num_inputs = num_inputs
         self.common_linear = nn.Linear(num_inputs, hidden_size)
