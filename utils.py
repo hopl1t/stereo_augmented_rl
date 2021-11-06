@@ -179,7 +179,8 @@ class EnvWrapper:
     """
 
     def __init__(self, env_name, obs_type=ObsType.VIDEO_ONLY, action_type=ActionType.ACT_WAIT,
-                 max_steps=5000, compression_rate=4, kill_hp_ratio=0.05, **kwargs):
+                 max_steps=5000, compression_rate=4, kill_hp_ratio=0.05, debug=False,
+                 time_penalty=0.005, **kwargs):
         """
         Wraps a gym environment s.t. you can control it's input and output
         :param env_name: str, The environments name
@@ -201,6 +202,8 @@ class EnvWrapper:
         self.health = 99
         self.score = 0
         self.kill_hp_ratio = kill_hp_ratio
+        self.debug = debug
+        self.time_penalty = time_penalty
         if obs_type == ObsType.VIDEO_ONLY:
             obs_shape = self.env.observation_space.shape
             self.obs_size = (int(np.ceil(obs_shape[0] / self.compression_rate))) * \
@@ -237,21 +240,28 @@ class EnvWrapper:
         if self.env_name == 'skeleton_plus':
             health = get_health_score(info['health_tens'], info['health_ones'])
             score = get_health_score(info['score_tens'], info['score_ones'])
-            health_delta = self.health - health
+            # Trying to fix the negative health_delta bug
+            if done:
+                health_delta = 10
+            else:
+                health_delta = self.health - health
             score_delta = score - self.score
             # TODO: removes these asserts once we know the program runs smoothly
             assert health_delta >= 0
             assert score_delta >= 0
             self.health = health
             self.score = score
-            reward = score_delta - (self.kill_hp_ratio * health_delta)
-            # TODO: consider adding manual done condition here
+            reward = score_delta - (self.kill_hp_ratio * health_delta) - self.time_penalty
+            if health < 10:
+                done = True
             # done =
+            if self.debug:
+                print('health: {}\tscore: {}\treward: {}\taction: {}'.format(health, score, reward, action))
         return obs, reward, done, info
 
     def process_obs(self, obs):
         if self.obs_type == ObsType.VIDEO_ONLY:
-            obs = obs[:, :, 0][::self.compression_rate, ::self.compression_rate].flatten()
+            obs = obs[:, :, 0][::self.compression_rate, ::self.compression_rate].flatten().astype(np.bool8)
         elif self.obs_type == ObsType.VIDEO_NO_CLUE:
             raise NotImplementedError
         elif self.obs_type == ObsType.VIDEO_MONO:

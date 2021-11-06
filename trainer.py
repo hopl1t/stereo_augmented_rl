@@ -35,6 +35,7 @@ def main(raw_args):
     parser.add_argument('-action_type', type=str, nargs='?',
                         help='Type of action to use - wither ACT_WAIT, FREE, NO_WAIT', default='ACT_WAIT')
     parser.add_argument('-epochs', type=int, nargs='?', help='Num epochs (episodes) to train', default=5000)
+    parser.add_argument('-time_penalty', type=float, nargs='?', help='penalty for each turn', default=0.005)
     parser.add_argument('-trajectory_len', type=int, nargs='?', help='Maximal length of single trajectory', default=5000)
     parser.add_argument('-lr', type=float, nargs='?', help='Learning rate', default=5e-3)
     parser.add_argument('-discount_gamma', type=float, nargs='?', help='Discount factor', default=0.99)
@@ -67,6 +68,7 @@ def main(raw_args):
     parser.add_argument('-no_cuda', action='store_true', help='Flag. If specified do not use cuda',default=False)
     parser.add_argument(
         '-no_PER', action='store_true', help='Flag. If specified disables the use of PER in DQN agents', default=False)
+    parser.add_argument('-debug', action='store_true', help='Flag. If specified prints debug data', default=False)
     parser.add_argument(
         '-clip_gradient', action='store_true', help='Flag. If specified the gradient is clipped during training to '
                                                     'prevent exploding gradient', default=False)
@@ -76,7 +78,8 @@ def main(raw_args):
     assert os.path.isdir(args.save_dir)
     assert os.path.isdir(args.log_dir)
     envs = [utils.EnvWrapper(args.env, utils.ObsType[args.obs_type], utils.ActionType[args.action_type],
-            args.max_len, num_discrete=args.num_discrete) for _ in range(args.num_envs)]
+            args.max_len, num_discrete=args.num_discrete, debug=args.debug, time_penalty=args.time_penalty)
+            for _ in range(args.num_envs)]
     env_gen = utils.AsyncEnvGen(envs, args.async_sleep_interval)
     if args.load:
         with open(args.load, 'rb') as f:
