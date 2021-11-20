@@ -246,15 +246,19 @@ class EnvWrapper:
             else:
                 health_delta = self.health - health
             score_delta = score - self.score
-            # TODO: removes these asserts once we know the program runs smoothly
-            assert health_delta >= 0
             assert score_delta >= 0
-            self.health = health
-            self.score = score
-            reward = score_delta - (self.kill_hp_ratio * health_delta) - self.time_penalty
+            if health_delta < 0:
+                # This is a bug in the game
+                if self.debug:
+                    print('health_delta < 0, info: {}\nskipping...'.format(info))
+                    reward = 0
+                    done = True
+            else:
+                self.health = health
+                self.score = score
+                reward = score_delta - (self.kill_hp_ratio * health_delta) - self.time_penalty
             if health < 10:
                 done = True
-            # done =
             if self.debug:
                 print('health: {}\tscore: {}\treward: {}\taction: {}'.format(health, score, reward, action))
         return obs, reward, done, info
@@ -351,3 +355,63 @@ class AsyncEnvGen(mp.Process):
 
     def kill(self):
         self._kill.set()
+
+
+class RetroEnvProcess(mp.Process):
+    def __init__(self, args):
+        super(RetroEnvProcess, self).__init__()
+        self._kill = mp.Event()
+        self.is_ready = False
+        self.state = None
+        self.env = None
+        self.args = args
+        self.sleep_interval = args.async_sleep_interval
+
+    def run(self):
+        while not self._kill.is_set():
+            if not self.is_ready:
+                self.env = EnvWrapper(self.args.env, ObsType[self.args.obs_type], ActionType[self.args.action_type],
+                                      self.args.max_len, num_discrete=self.args.num_discrete, debug=self.args.debug,
+                                      time_penalty=self.args.time_penalty)
+                self.state = self.env.reset()
+                self.is_ready = True
+            if self.sleep_interval != 0:
+                time.sleep(self.sleep_interval)
+
+    def get_state_env(self):
+        while not self.is_ready:
+            time.sleep(self.sleep_interval)
+        return self.state, self.env
+
+    def reset(self):
+        self.env.close()
+        self.is_ready = False
+
+    def kill(self):
+        self._kill.set()
+
+
+class AsyncRetroEnvGen:
+    """
+    Creates and manages retro environments a-synchroneuosly
+    This is used to save time on env.reset() command while playing a game
+    This is a special case for retro lib since it's not possible to have two envs together
+    """
+    def __init__(self, args):
+        self.args = args
+        self.num_envs = args.num_envs
+        self.envs = [RetroEnvProcess(args) for _ in range(args.num_envs)]
+        self._kill = mp.Event()
+        self.env_idx = 0
+        self.sleep_interval = args.async_sleep_interval
+
+    def get_reset_env(self):
+        self.envs[self.env_idx].reset()
+        self.env_idx += 1
+        state, env = self.envs[self.env_idx].get_state_env()
+        return state, env
+
+    def kill(self):
+        self._kill.set()
+        for env in self.envs:
+            env.kill()

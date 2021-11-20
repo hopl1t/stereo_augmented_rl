@@ -77,15 +77,23 @@ def main(raw_args):
     args = parser.parse_args(raw_args)
     assert os.path.isdir(args.save_dir)
     assert os.path.isdir(args.log_dir)
-    envs = [utils.EnvWrapper(args.env, utils.ObsType[args.obs_type], utils.ActionType[args.action_type],
-            args.max_len, num_discrete=args.num_discrete, debug=args.debug, time_penalty=args.time_penalty)
-            for _ in range(args.num_envs)]
-    env_gen = utils.AsyncEnvGen(envs, args.async_sleep_interval)
+
+    # envs = [utils.EnvWrapper(args.env, utils.ObsType[args.obs_type], utils.ActionType[args.action_type],
+    #         args.max_len, num_discrete=args.num_discrete, debug=args.debug, time_penalty=args.time_penalty)
+    #         for _ in range(args.num_envs)]
+    # env_gen = utils.AsyncEnvGen(envs, args.async_sleep_interval)
+    # obs_size = envs[0].obs_size
+    # num_actions = envs[0].num_actions
+
+    env_gen = utils.AsyncRetroEnvGen(args)
+    obs_size = 2120
+    num_actions = 5
+
     if args.load:
         with open(args.load, 'rb') as f:
             agent = pickle.load(f)
     else:
-        model = getattr(models, args.model)(envs[0].obs_size, envs[0].num_actions, hidden_size=args.hidden_size,
+        model = getattr(models, args.model)(obs_size, num_actions, hidden_size=args.hidden_size,
                                             num_discrete=args.num_discrete, std_bias=args.std_bias)
         timestamp = datetime.now().strftime('%y%m%d%H%m')
         save_path = os.path.join(args.save_dir, '{0}_{1}_{2}.pkl'.format(args.model, args.env, timestamp))
