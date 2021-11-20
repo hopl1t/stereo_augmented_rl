@@ -384,7 +384,8 @@ class RetroEnvProcess(mp.Process):
         return self.state, self.env
 
     def reset(self):
-        self.env.close()
+        if self.env:
+            self.env.close()
         self.is_ready = False
 
     def kill(self):
@@ -401,17 +402,21 @@ class AsyncRetroEnvGen:
         self.args = args
         self.num_envs = args.num_envs
         self.envs = [RetroEnvProcess(args) for _ in range(args.num_envs)]
-        self._kill = mp.Event()
         self.env_idx = 0
         self.sleep_interval = args.async_sleep_interval
 
     def get_reset_env(self):
         self.envs[self.env_idx].reset()
         self.env_idx += 1
+        if self.env_idx == self.num_envs:
+            self.env_idx = 0
         state, env = self.envs[self.env_idx].get_state_env()
         return state, env
 
+    def start(self):
+        for env in self.envs:
+            env.start()
+
     def kill(self):
-        self._kill.set()
         for env in self.envs:
             env.kill()

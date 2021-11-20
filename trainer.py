@@ -78,16 +78,18 @@ def main(raw_args):
     assert os.path.isdir(args.save_dir)
     assert os.path.isdir(args.log_dir)
 
-    # envs = [utils.EnvWrapper(args.env, utils.ObsType[args.obs_type], utils.ActionType[args.action_type],
-    #         args.max_len, num_discrete=args.num_discrete, debug=args.debug, time_penalty=args.time_penalty)
-    #         for _ in range(args.num_envs)]
-    # env_gen = utils.AsyncEnvGen(envs, args.async_sleep_interval)
-    # obs_size = envs[0].obs_size
-    # num_actions = envs[0].num_actions
+    envs = [utils.EnvWrapper(args.env, utils.ObsType[args.obs_type], utils.ActionType[args.action_type],
+            args.max_len, num_discrete=args.num_discrete, debug=args.debug, time_penalty=args.time_penalty)
+            for _ in range(args.num_envs)]
+    env_gen = utils.AsyncEnvGen(envs, args.async_sleep_interval)
+    obs_size = envs[0].obs_size
+    num_actions = envs[0].num_actions
 
-    env_gen = utils.AsyncRetroEnvGen(args)
-    obs_size = 2120
-    num_actions = 5
+    # TODO: async env with Retro does not work yet, for some reason env.start() does not start the process
+    #       and the program gets stuck in a loop. Don't forget to add both num_envs and async_env flags when testing
+    # env_gen = utils.AsyncRetroEnvGen(args)
+    # obs_size = 2120
+    # num_actions = 5
 
     if args.load:
         with open(args.load, 'rb') as f:
