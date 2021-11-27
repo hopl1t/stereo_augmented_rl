@@ -21,8 +21,12 @@ except ModuleNotFoundError as e:
 class ObsType(Enum):
     VIDEO_ONLY = 1
     VIDEO_NO_CLUE = 2
-    VIDEO_MONO = 3
-    VIDEO_STEREO = 4
+    VNC_NAIVE_MONO = 3
+    VNC_NAIVE_STEREO = 4
+    VIDEO_NAIVE_STEREO = 5
+    VNC_RNN_MONO = 6
+    VNC_RNN_STEREO = 7
+    VIDEO_RNN_STEREO = 8
 
 
 class ActionType(Enum):
@@ -241,7 +245,11 @@ class EnvWrapper:
     def step(self, action, is_eval=False):
         if self.action_type == ActionType.ACT_WAIT:
             _, reward1, done1, _ = self.env.step(self.discretisizer.action(action))
-            obs, reward2, done2, info = self.env.step(self.discretisizer.action(MoveType.NONE.value))
+            if not done1:
+                obs, reward2, done2, info = self.env.step(self.discretisizer.action(MoveType.NONE.value))
+            else:
+                done2 = True
+                reward2 = 0
             reward = reward1 + reward2
             done = done1 | done2
         else:
@@ -273,11 +281,27 @@ class EnvWrapper:
                 print('health: {}\tscore: {}\treward: {}\taction: {}'.format(health, score, reward, action))
         return obs, reward, done, info
 
+
+    @staticmethod
+    def remove_clue(obs):
+        """
+        Removes the clue from the observation
+        :param obs: np.array, observation
+        :return: np.array, observation without clue
+        """
+        mask = np.zeros((9, 8, 3))
+        obs[178:187, 3:11] = mask  # lower left clue
+        obs[3:12, 3:11] = mask  # upper left clue
+        obs[3: 12, 150: 158] = mask  # upper right clue
+        obs[178: 187, 150: 158] = mask  # lower right clue
+        return obs
+
     def process_obs(self, obs):
         if self.obs_type == ObsType.VIDEO_ONLY:
             obs = obs[:, :, 0][::self.compression_rate, ::self.compression_rate].flatten().astype(np.bool8)
         elif self.obs_type == ObsType.VIDEO_NO_CLUE:
-            raise NotImplementedError
+            obs = self.remove_clue(obs)
+            obs = obs[:, :, 0][::self.compression_rate, ::self.compression_rate].flatten().astype(np.bool8)
         elif self.obs_type == ObsType.VIDEO_MONO:
             raise NotImplementedError
         elif self.obs_type == ObsType.VIDEO_STEREO:
