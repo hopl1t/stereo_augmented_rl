@@ -244,7 +244,7 @@ class EnvWrapper:
 
     def step(self, action, is_eval=False):
         if self.action_type == ActionType.ACT_WAIT:
-            _, reward1, done1, _ = self.env.step(self.discretisizer.action(action))
+            obs, reward1, done1, info = self.env.step(self.discretisizer.action(action))
             if not done1:
                 obs, reward2, done2, info = self.env.step(self.discretisizer.action(MoveType.NONE.value))
             else:
