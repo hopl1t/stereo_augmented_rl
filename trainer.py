@@ -5,8 +5,10 @@ import models
 import utils
 import pickle
 from datetime import datetime
-from a2c_agent import A2CAgent
-from dqn_agent import DQNAgent
+import retro
+from utils import Discretizer
+from a2c_agent import A2CAgent # Don't remove this
+from dqn_agent import DQNAgent # Don't remove this
 
 
 def main(raw_args):
@@ -94,6 +96,9 @@ def main(raw_args):
     if args.load:
         with open(args.load, 'rb') as f:
             agent = pickle.load(f)
+            # In retro one cannot save the env and discretisizer, so we need to recreate them
+            agent.env.env = retro.retro_env.RetroEnv
+            agent.discretisizer = Discretizer(envs[0].env, [['UP'], ['LEFT'], ['RIGHT'], ['BUTTON'], [None]])
     else:
         model = getattr(models, args.model)(obs_size, num_actions, hidden_size=args.hidden_size,
                                             num_discrete=args.num_discrete, std_bias=args.std_bias)

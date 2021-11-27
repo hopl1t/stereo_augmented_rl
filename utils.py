@@ -117,7 +117,17 @@ def init_weights(model):
 
 def save_agent(agent):
     with open(agent.save_path, 'wb') as f:
-        pickle.dump(agent, f)
+        if isinstance(agent.env.env, retro.retro_env.RetroEnv):
+            # In retro one cannot save the env and discretisizer, so we need to recreate them
+            tmp_env = agent.env.env
+            tmp_discretisizer = agent.env.discretisizer
+            agent.env.env = None
+            agent.env.discretisizer = None
+            pickle.dump(agent, f)
+            agent.env.env = tmp_env
+            agent.env.discretisizer = tmp_discretisizer
+        else:
+            pickle.dump(agent, f)
     sys.stdout.write('Saved agent to {}\n'.format(agent.save_path))
 
 
