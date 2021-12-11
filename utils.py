@@ -27,6 +27,7 @@ class ObsType(Enum):
     VNC_RNN_MONO = 6
     VNC_RNN_STEREO = 7
     VIDEO_RNN_STEREO = 8
+    STEREO_ONLY = 9
 
 
 class ActionType(Enum):
@@ -218,15 +219,13 @@ class EnvWrapper:
         self.kill_hp_ratio = kill_hp_ratio
         self.debug = debug
         self.time_penalty = time_penalty
-        if obs_type == ObsType.VIDEO_ONLY:
+        if obs_type == ObsType.VIDEO_ONLY or obs_type == ObsType.VIDEO_NO_CLUE:
             obs_shape = self.env.observation_space.shape
             self.obs_size = (int(np.ceil(obs_shape[0] / self.compression_rate))) * \
                             (int(np.ceil(obs_shape[1] / self.compression_rate)))
-        elif obs_type == ObsType.VIDEO_NO_CLUE:
+        elif obs_type == ObsType.VNC_NAIVE_MONO:
             raise NotImplementedError
-        elif obs_type == ObsType.VIDEO_MONO:
-            raise NotImplementedError
-        elif obs_type == ObsType.VIDEO_STEREO:
+        elif obs_type == ObsType.VNC_NAIVE_STEREO:
             raise NotImplementedError
         if action_type == ActionType.ACT_WAIT:
             self.num_actions = len(MoveType)
@@ -283,29 +282,43 @@ class EnvWrapper:
 
 
     @staticmethod
-    def remove_clue(obs):
+    def obfuscate_clue(obs):
         """
-        Removes the clue from the observation
+        Obfuscates the clue from the observation
         :param obs: np.array, observation
         :return: np.array, observation without clue
         """
-        mask = np.zeros((9, 8, 3))
+        mask = np.ones((9, 8, 3), dtype=np.uint8) * 255
         obs[178:187, 3:11] = mask  # lower left clue
         obs[3:12, 3:11] = mask  # upper left clue
         obs[3: 12, 150: 158] = mask  # upper right clue
         obs[178: 187, 150: 158] = mask  # lower right clue
+        obs[90:99, 150:158] = mask # middle right clue
+        obs[90:99, 3:11] = mask # middle left clue
         return obs
+
+    def compress_obs(self, obs):
+        """
+        Compresses the observation
+        :param obs: np.array, observation
+        :return: np.array, compressed observation
+        """
+        # return obs[:, :, 0][::self.compression_rate, ::self.compression_rate].flatten().astype(np.bool8)
+        return obs.sum(axis=2, dtype=np.uint8)[::self.compression_rate, ::self.compression_rate].flatten().clip(max=1)
 
     def process_obs(self, obs):
         if self.obs_type == ObsType.VIDEO_ONLY:
-            obs = obs[:, :, 0][::self.compression_rate, ::self.compression_rate].flatten().astype(np.bool8)
+            obs = self.compress_obs(obs)
         elif self.obs_type == ObsType.VIDEO_NO_CLUE:
-            obs = self.remove_clue(obs)
-            obs = obs[:, :, 0][::self.compression_rate, ::self.compression_rate].flatten().astype(np.bool8)
-        elif self.obs_type == ObsType.VIDEO_MONO:
-            raise NotImplementedError
-        elif self.obs_type == ObsType.VIDEO_STEREO:
-            raise NotImplementedError
+            obs = self.obfuscate_clue(obs)
+            obs = self.compress_obs(obs)
+        elif self.obs_type == ObsType.VNC_NAIVE_MONO:
+            stereo = self.env.em.get_audio()
+            mono = stereo.sum(axis=1).astype(np.int16) / 2
+            obs = (self.compress_obs(obs), mono)
+        elif self.obs_type == ObsType.VNC_NAIVE_STEREO:
+            stereo = self.env.em.get_audio()
+            obs = (self.compress_obs(obs), stereo.flatten())
         return obs
 
     @staticmethod

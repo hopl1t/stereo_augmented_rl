@@ -49,6 +49,31 @@ class CommonActorCritic(nn.Module):
         return value, policy_dist
 
 
+class MonoSimpleActorCritic(nn.Module):
+    """
+    Multimodal net that recieves mono sound input as well as screen input
+    The different signals go through different linear layers before processed together
+    No data is kept between states
+    """
+    def __init__(self, num_inputs, num_actions, hidden_size=512, device=torch.device('cpu'), **kwargs):
+        super(MonoSimpleActorCritic, self).__init__()
+        self.num_actions = num_actions
+        self.num_inputs = num_inputs
+        self.common_linear = nn.Linear(num_inputs, hidden_size)
+        self.critic_linear = nn.Linear(hidden_size, 1)
+        self.actor_linear = nn.Linear(hidden_size, num_actions)
+        self.device = device
+        utils.init_weights(self)
+
+    def forward(self, state):
+        state = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
+        common = F.leaky_relu(self.common_linear(state))
+        value = self.critic_linear(common)
+        policy_dist = F.softmax(self.actor_linear(common), dim=1)
+
+        return value, policy_dist
+
+
 class DoubleCommonActorCritic(nn.Module):
     """
     First FC layer is common between both nets
