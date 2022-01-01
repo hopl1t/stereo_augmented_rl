@@ -83,11 +83,9 @@ class DQNAgent:
                 target = (reward + discount_gamma * new_q).view(1, -1, 1)
                 delta = self.get_delta(q_vals, action_idx, target)
                 experience.append((state, action_idx, reward, new_state, done, delta))
-                state = new_state.copy()
+                state = (new_state[0].copy(), new_state[1].copy())
                 if step == self.env.max_steps - 1:
                     done = True
-                if info['used_trick']:
-                    tricks_used += 1
                 traj_rewards.append(reward)
                 episode_rewards.append(reward)
                 if log_interval: # ie if to log at all
@@ -158,12 +156,7 @@ class DQNAgent:
         return action
 
     def get_delta(self, q_vals, action_idx, target):
-        if self.env.action_type in [utils.ActionType.REGULAR, utils.ActionType.FIXED_LUNAR]:
-            delta = abs(q_vals.detach().squeeze(0)[action_idx] - target) + 0.001
-        elif self.env.action_type == utils.ActionType.DISCRETIZIED:
-            delta = abs((torch.gather(q_vals, -1, action_idx) - target)).sum() + 0.001
-        else:
-            raise NotImplementedError
+        delta = abs(q_vals.detach().squeeze(0)[action_idx] - target) + 0.001
         return delta
 
     def predict(self, state, action_idx):

@@ -1,4 +1,4 @@
-from enum import Enum
+from enum import Enum, auto
 import time
 import multiprocessing as mp
 import torch
@@ -19,15 +19,15 @@ except ModuleNotFoundError as e:
 
 
 class ObsType(Enum):
-    VIDEO_ONLY = 1
-    VIDEO_NO_CLUE = 2
-    VNC_NAIVE_MONO = 3
-    VNC_NAIVE_STEREO = 4
-    VIDEO_NAIVE_STEREO = 5
-    VNC_RNN_MONO = 6
-    VNC_RNN_STEREO = 7
-    VIDEO_RNN_STEREO = 8
-    STEREO_ONLY = 9
+    VIDEO_ONLY = auto()
+    VIDEO_NO_CLUE = auto()
+    VNC_BUFFER_MONO = auto()
+    VNC_BUFFER_STEREO = auto()
+    VNC_MAX_MONO = auto()
+    VNC_MAX_STEREO = auto()
+    VNC_FOURIER_STEREO = auto()
+    VIDEO_CONV = auto()
+    # TODO: Add RNN with the best of the naive types, and sound only with the best of the naive types
 
 
 class ActionType(Enum):
@@ -42,6 +42,11 @@ class MoveType(Enum):
     RIGHT = 2
     BUTTON = 3
     NONE = 4
+
+
+MAX_VOL = 2**14
+AUDIO_BUFFER_SIZE = 524
+SPECTOGRAM_SIZE = 64
 
 
 class PERDataLoader(torch.utils.data.DataLoader):
@@ -219,14 +224,25 @@ class EnvWrapper:
         self.kill_hp_ratio = kill_hp_ratio
         self.debug = debug
         self.time_penalty = time_penalty
+        obs_shape = self.env.observation_space.shape
+        compressed_y_shape = (int(np.ceil(obs_shape[0] / self.compression_rate)))
+        compressed_x_shape = (int(np.ceil(obs_shape[1] / self.compression_rate)))
+        # self.obs shape: ((y_dim, x_dim), audio)
         if obs_type == ObsType.VIDEO_ONLY or obs_type == ObsType.VIDEO_NO_CLUE:
-            obs_shape = self.env.observation_space.shape
-            self.obs_size = (int(np.ceil(obs_shape[0] / self.compression_rate))) * \
-                            (int(np.ceil(obs_shape[1] / self.compression_rate)))
-        elif obs_type == ObsType.VNC_NAIVE_MONO:
-            raise NotImplementedError
-        elif obs_type == ObsType.VNC_NAIVE_STEREO:
-            raise NotImplementedError
+            self.obs_shape = ((compressed_y_shape, compressed_x_shape), 0)
+        if obs_type == ObsType.VIDEO_CONV:
+            self.obs_shape = ((compressed_y_shape, compressed_x_shape), 0)
+        elif obs_type == ObsType.VNC_BUFFER_MONO:
+            self.obs_shape = ((compressed_y_shape, compressed_x_shape), AUDIO_BUFFER_SIZE)
+        elif obs_type == ObsType.VNC_BUFFER_STEREO:
+            self.obs_shape = ((compressed_y_shape, compressed_x_shape), AUDIO_BUFFER_SIZE * 2)
+        elif obs_type == ObsType.VNC_MAX_MONO:
+            self.obs_shape = ((compressed_y_shape, compressed_x_shape), 1)
+        elif obs_type == ObsType.VNC_MAX_STEREO:
+            self.obs_shape = ((compressed_y_shape, compressed_x_shape), 2)
+        elif obs_type == ObsType.VNC_FOURIER_STEREO:
+            self.obs_shape = ((compressed_y_shape, compressed_x_shape), 4)  # frequency left + max vol, frequency right + max vol
+
         if action_type == ActionType.ACT_WAIT:
             self.num_actions = len(MoveType)
             # self.env.action_space.n
@@ -280,7 +296,6 @@ class EnvWrapper:
                 print('health: {}\tscore: {}\treward: {}\taction: {}'.format(health, score, reward, action))
         return obs, reward, done, info
 
-
     @staticmethod
     def obfuscate_clue(obs):
         """
@@ -295,6 +310,7 @@ class EnvWrapper:
         obs[178: 187, 150: 158] = mask  # lower right clue
         obs[90:99, 150:158] = mask # middle right clue
         obs[90:99, 3:11] = mask # middle left clue
+        obs[90:99, 76:84] = mask # middle middle clue
         return obs
 
     def compress_obs(self, obs):
@@ -304,21 +320,49 @@ class EnvWrapper:
         :return: np.array, compressed observation
         """
         # return obs[:, :, 0][::self.compression_rate, ::self.compression_rate].flatten().astype(np.bool8)
-        return obs.sum(axis=2, dtype=np.uint8)[::self.compression_rate, ::self.compression_rate].flatten().clip(max=1)
+        # return obs.sum(axis=2, dtype=np.uint8)[::self.compression_rate, ::self.compression_rate].flatten().clip(max=1)
+        return obs.sum(axis=2, dtype=np.uint8)[::self.compression_rate, ::self.compression_rate].clip(max=1)
+
+    @staticmethod
+    def normalize_sound(audio):
+        """
+        Maps audio to be in a scale from -1 to 1
+        :param audio: np.array, stereo audio
+        :return: np.array, normalized audio
+        """
+        return np.interp(audio, [0, MAX_VOL], [-1, 1])
 
     def process_obs(self, obs):
         if self.obs_type == ObsType.VIDEO_ONLY:
-            obs = self.compress_obs(obs)
+            obs = (self.compress_obs(obs), np.zeros(SPECTOGRAM_SIZE))
         elif self.obs_type == ObsType.VIDEO_NO_CLUE:
             obs = self.obfuscate_clue(obs)
-            obs = self.compress_obs(obs)
-        elif self.obs_type == ObsType.VNC_NAIVE_MONO:
+            obs = (self.compress_obs(obs), np.zeros(SPECTOGRAM_SIZE))
+        elif self.obs_type == ObsType.VIDEO_CONV:
+            obs = self.obfuscate_clue(obs)
+            obs = (self.compress_obs(obs), np.zeros(SPECTOGRAM_SIZE))
+        elif self.obs_type == ObsType.VNC_BUFFER_MONO:
             stereo = self.env.em.get_audio()
             mono = stereo.sum(axis=1).astype(np.int16) / 2
+            mono = self.normalize_sound(mono)
             obs = (self.compress_obs(obs), mono)
-        elif self.obs_type == ObsType.VNC_NAIVE_STEREO:
+        elif self.obs_type == ObsType.VNC_BUFFER_STEREO:
             stereo = self.env.em.get_audio()
-            obs = (self.compress_obs(obs), stereo.flatten())
+            # obs = (self.compress_obs(obs), stereo.flatten())
+            obs = (self.compress_obs(obs), stereo)
+        elif self.obs_type == ObsType.VNC_MAX_MONO:
+            stereo = self.env.em.get_audio()
+            max_mono = stereo.max().astype(np.int16)
+            mono = self.normalize_sound(max_mono)
+            obs = (self.compress_obs(obs), np.array(mono))
+        elif self.obs_type == ObsType.VNC_MAX_STEREO:
+            stereo = self.env.em.get_audio()
+            max_stereo = stereo.max(axis=0).astype(np.int16)
+            max_stereo = self.normalize_sound(max_stereo)
+            obs = (self.compress_obs(obs), max_stereo)
+        elif self.obs_type == ObsType.VNC_FOURIER_STEREO:
+            raise NotImplementedError
+
         return obs
 
     @staticmethod
@@ -397,8 +441,9 @@ class AsyncEnvGen(mp.Process):
         if self.is_alive():
             return self.q.get()
         else:
-            state = self.envs[0].reset()
-            return state, self.envs[0]
+            env = self.envs[0]
+            state = env.reset()
+            return state, env
 
     def kill(self):
         self._kill.set()

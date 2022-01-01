@@ -84,7 +84,7 @@ def main(raw_args):
             args.max_len, num_discrete=args.num_discrete, debug=args.debug, time_penalty=args.time_penalty)
             for _ in range(args.num_envs)]
     env_gen = utils.AsyncEnvGen(envs, args.async_sleep_interval)
-    obs_size = envs[0].obs_size
+    obs_shape = envs[0].obs_shape
     num_actions = envs[0].num_actions
 
     # TODO: async env with Retro does not work yet, for some reason env.start() does not start the process
@@ -100,7 +100,7 @@ def main(raw_args):
             agent.env.env = retro.retro_env.RetroEnv
             agent.env.discretisizer = Discretizer(envs[0].env, [['UP'], ['LEFT'], ['RIGHT'], ['BUTTON'], [None]])
     else:
-        model = getattr(models, args.model)(obs_size, num_actions, hidden_size=args.hidden_size,
+        model = getattr(models, args.model)(obs_shape, num_actions, hidden_size=args.hidden_size,
                                             num_discrete=args.num_discrete, std_bias=args.std_bias)
         timestamp = datetime.now().strftime('%y%m%d%H%m')
         save_path = os.path.join(args.save_dir, '{0}_{1}_{2}.pkl'.format(args.model, args.env, timestamp))

@@ -4,437 +4,98 @@ import torch.nn.functional as F
 import utils
 
 
-class SimpleActorCritic(nn.Module):
-    def __init__(self, num_inputs, num_actions, hidden_size=512, device=torch.device('cpu'), **kwargs):
-        super(SimpleActorCritic, self).__init__()
-
-        self.num_actions = num_actions
-        self.num_inputs = num_inputs
-        self.critic_linear1 = nn.Linear(num_inputs, hidden_size)
-        self.critic_linear2 = nn.Linear(hidden_size, 1)
-        self.actor_linear1 = nn.Linear(num_inputs, hidden_size)
-        self.actor_linear2 = nn.Linear(hidden_size, num_actions)
-        self.device = device
-        utils.init_weights(self)
-
-    def forward(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
-        value = F.relu(self.critic_linear1(state))
-        value = self.critic_linear2(value)
-        policy_dist = F.relu(self.actor_linear1(state))
-        policy_dist = F.softmax(self.actor_linear2(policy_dist), dim=1)
-        return value, policy_dist
-
-
 class CommonActorCritic(nn.Module):
     """
     First FC layer is common between both nets
     """
-    def __init__(self, num_inputs, num_actions, hidden_size=512, device=torch.device('cpu'), **kwargs):
+    def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), **kwargs):
         super(CommonActorCritic, self).__init__()
         self.num_actions = num_actions
-        self.num_inputs = num_inputs
-        self.common_linear = nn.Linear(num_inputs, hidden_size)
+        obs_shape = obs_shape[0][0] * obs_shape[0][1]
+        self.common_linear = nn.Linear(obs_shape, hidden_size)
         self.critic_linear = nn.Linear(hidden_size, 1)
         self.actor_linear = nn.Linear(hidden_size, num_actions)
         self.device = device
         utils.init_weights(self)
 
     def forward(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
+        state = torch.from_numpy(state[0].flatten()).float().unsqueeze(0).to(self.device)
         common = F.leaky_relu(self.common_linear(state))
         value = self.critic_linear(common)
         policy_dist = F.softmax(self.actor_linear(common), dim=1)
 
-        return value, policy_dist
-
-
-class MonoSimpleActorCritic(nn.Module):
-    """
-    Multimodal net that recieves mono sound input as well as screen input
-    The different signals go through different linear layers before processed together
-    No data is kept between states
-    """
-    def __init__(self, num_inputs, num_actions, hidden_size=512, device=torch.device('cpu'), **kwargs):
-        super(MonoSimpleActorCritic, self).__init__()
-        self.num_actions = num_actions
-        self.num_inputs = num_inputs
-        self.common_linear = nn.Linear(num_inputs, hidden_size)
-        self.critic_linear = nn.Linear(hidden_size, 1)
-        self.actor_linear = nn.Linear(hidden_size, num_actions)
-        self.device = device
-        utils.init_weights(self)
-
-    def forward(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
-        common = F.leaky_relu(self.common_linear(state))
-        value = self.critic_linear(common)
-        policy_dist = F.softmax(self.actor_linear(common), dim=1)
-
-        return value, policy_dist
-
-
-class DoubleCommonActorCritic(nn.Module):
-    """
-    First FC layer is common between both nets
-    """
-    def __init__(self, num_inputs, num_actions, hidden_size=512, device=torch.device('cpu'), **kwargs):
-        super(DoubleCommonActorCritic, self).__init__()
-
-        self.num_actions = num_actions
-        self.num_inputs = num_inputs
-        self.common_linear = nn.Sequential(nn.Linear(num_inputs, hidden_size), nn.LeakyReLU(),
-                                           nn.Linear(hidden_size, hidden_size // 2), nn.LeakyReLU())
-        self.critic_linear = nn.Linear(hidden_size // 2, 1)
-        self.actor_linear = nn.Linear(hidden_size // 2, num_actions)
-        self.device = device
-        utils.init_weights(self)
-
-    def forward(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
-        common = self.common_linear(state)
-        value = self.critic_linear(common)
-        policy_dist = F.softmax(self.actor_linear(common), dim=1)
         return value, policy_dist
 
 
 class ConvActorCritic(nn.Module):
     """
-    Uses two common 3x3 convs on the first layer followed by a common linear.
-    Expects a num_input of that is the dimension of one side of the input (ie 7).
+    Uses convolutional layers instead of fully connected layers
     """
-    def __init__(self, num_inputs, num_actions, hidden_size=512, device=torch.device('cpu'), **kwargs):
+    def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), **kwargs):
         super(ConvActorCritic, self).__init__()
-
         self.num_actions = num_actions
-        self.num_inputs = num_inputs
-        # 1 input channel, 10 out channels, 3x3 square convolution
-        # out shape will be: 7 - 3 + 2 + 1 = 10x7x7 (for a 7x7 input)
-        # no pooling
-        conv1 = nn.Conv2d(1, 10, 3, padding=1)
-        # 10 input channels, 5 out channels, 3x3 square convolution
-        # out shape will be: 7 - 3 + 2 + 1 = 5x7x7
-        # no pooling
-        conv2 = nn.Conv2d(10, 5, 3, padding=1)
-        self.common_linear = nn.Linear((num_inputs**2) * 5, hidden_size)
-        self.conv_block = nn.Sequential(conv1, nn.ReLU(), conv2, nn.ReLU())
+        y_dim = obs_shape[0][0]
+        x_dim = obs_shape[0][1]
+        # output shape: (10, y - 3 + 1, x - 3 + 1), after pooling (10, (y - 3 + 1) // 2, (x - 3 + 1) // 2)
+        self.conv1 = nn.Conv2d(1, 10, 3)
+        # output shape: (5, (y - 3 + 1) // 2 - 3 + 1, (x - 3 + 1) // 2 - 3 + 1), no pooling
+        self.conv2 = nn.Conv2d(10, 5, 3)
+        # output shape: (5, (y - 3 + 1) // 2 - 6 + 2, (x - 3 + 1) // 2 - 6 + 2),
+        # after pooling (5, ((y - 3 + 1) // 2 - 6 + 2) // 2, ((x - 3 + 1) // 2 - 6 + 2) // 2)
+        self.conv3 = nn.Conv2d(5, 16, 3)
+        vid_feature_size = (((((y_dim - 3 + 1) // 2) - 3 + 1) - 3 + 1) // 2) * \
+                           (((((x_dim - 3 + 1) // 2) - 3 + 1) - 3 + 1) // 2) * 16
+        self.common_linear = nn.Linear(vid_feature_size, hidden_size)
         self.critic_linear = nn.Linear(hidden_size, 1)
         self.actor_linear = nn.Linear(hidden_size, num_actions)
         self.device = device
         utils.init_weights(self)
 
     def forward(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
-        convolved = self.conv_block(state.unsqueeze(0))
-        common = F.relu(self.common_linear(torch.flatten(convolved, start_dim=1)))
+        state = torch.from_numpy(state[0]).float().unsqueeze(0).unsqueeze(0).to(self.device)
+        vid_feature = F.max_pool2d(F.leaky_relu(self.conv1(state)), 2)
+        vid_feature = F.leaky_relu(self.conv2(vid_feature))
+        vid_feature = F.max_pool2d(F.leaky_relu(self.conv3(vid_feature)), 2)
+        vid_feature = torch.flatten(vid_feature, start_dim=1)
+        common = F.leaky_relu(self.common_linear(vid_feature))
         value = self.critic_linear(common)
         policy_dist = F.softmax(self.actor_linear(common), dim=1)
-
         return value, policy_dist
 
 
-class DiscreteActorCritic(nn.Module):
+class NaiveSoundActorCritic(nn.Module):
     """
-    For a discretisized continouous environment with more than one action per state
-    The difference from a regular net is that we do 2 softmaxs
+    Naive multimodal net that processes sound and video separately before concating into common layer
+    Naive in the sense that no RNN is applied over time
+    This net can take any naive multimodal input such as buffer, max volume or frequency + volume (Fourire).
     """
-    def __init__(self, num_inputs, num_actions, hidden_size=512, device=torch.device('cpu'), num_discrete=100, **kwargs):
-        super(DiscreteActorCritic, self).__init__()
+    def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), **kwargs):
+        super(NaiveSoundActorCritic, self).__init__()
         self.num_actions = num_actions
-        self.num_inputs = num_inputs
-        self.common_linear = nn.Linear(num_inputs, hidden_size)
-        self.critic_linear = nn.Linear(hidden_size, 1)
-        self.actor_linear = nn.Linear(hidden_size, num_actions * num_discrete)
-        self.num_discrete = num_discrete
+        self.obs_shape = obs_shape
+        self.common_video_linear = nn.Linear(obs_shape[0], hidden_size)
+        self.common_audio_linear = nn.Linear(obs_shape[1], hidden_size // 4)
+        self.critic_linear = nn.Linear(hidden_size + hidden_size // 4, 1)
+        self.actor_linear = nn.Linear(hidden_size + hidden_size // 4, num_actions)
         self.device = device
         utils.init_weights(self)
 
     def forward(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
-        common = F.relu(self.common_linear(state))
+        video_state = torch.from_numpy(state[0]).float().unsqueeze(0).to(self.device)
+        audio_state = torch.from_numpy(state[1]).float().unsqueeze(0).to(self.device)
+        common_video = F.leaky_relu(self.common_video_linear(video_state))
+        common_audio = F.leaky_relu(self.common_audio_linear(audio_state))
+        common = torch.cat((common_video, common_audio))
         value = self.critic_linear(common)
-        policy_dist = F.softmax(self.actor_linear(common).view(self.num_actions, self.num_discrete), dim=1)
-
-        return value, policy_dist
-
-
-class TripleDiscreteActorCritic(nn.Module):
-    """
-    Like the prior only with 2 common layers
-    """
-    def __init__(self, num_inputs, num_actions, hidden_size=512, device=torch.device('cpu'), num_discrete=100, **kwargs):
-        super(TripleDiscreteActorCritic, self).__init__()
-        self.num_actions = num_actions
-        self.num_inputs = num_inputs
-        self.common_linear = nn.Sequential(nn.Linear(num_inputs, hidden_size//2), nn.ReLU(),
-                                           nn.Linear(hidden_size//2, hidden_size), nn.ReLU(),
-                                           nn.Linear(hidden_size, hidden_size//2), nn.ReLU())
-        self.critic_linear = nn.Linear(hidden_size//2, 1)
-        self.actor_linear = nn.Linear(hidden_size//2, num_actions * num_discrete)
-        self.num_discrete = num_discrete
-        self.device = device
-        utils.init_weights(self)
-
-    def forward(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
-        common = self.common_linear(state)
-        value = self.critic_linear(common)
-        policy_dist = F.softmax(self.actor_linear(common).view(self.num_actions, self.num_discrete), dim=1)
-        return value, policy_dist
-
-
-class SplitDiscreteActorCritic(nn.Module):
-    """
-    Both nets diverge and converge
-    """
-    def __init__(self, num_inputs, num_actions, hidden_size=400, device=torch.device('cpu'), num_discrete=100, **kwargs):
-        super(SplitDiscreteActorCritic, self).__init__()
-        self.num_actions = num_actions
-        self.num_inputs = num_inputs
-        self.common = nn.Sequential(nn.Linear(num_inputs, hidden_size), nn.LeakyReLU()) #, nn.BatchNorm1d(hidden_size)
-        self.actor = nn.Sequential(nn.Linear(hidden_size, hidden_size//2), nn.LeakyReLU(),
-                                   nn.Linear(hidden_size//2, num_actions * num_discrete)) # , nn.BatchNorm1d(hidden_size//2)
-        self.critic1 = nn.Sequential(nn.Linear(hidden_size, hidden_size//2), nn.LeakyReLU()) # , nn.BatchNorm1d(hidden_size//2)
-        self.critic2 = nn.Linear(hidden_size//2, 1)
-        self.residual = nn.Sequential(nn.Linear(num_actions * num_discrete, hidden_size//2), nn.LeakyReLU())
-        self.num_discrete = num_discrete
-        self.device = device
-        utils.init_weights(self)
-
-    def forward(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
-        common = self.common(state)
-        policy_dist = F.softmax(self.actor(common).view(self.num_actions, self.num_discrete), dim=1)
-        critic1 = self.critic1(common)
-        residual = self.residual(policy_dist.flatten())
-        value = self.critic2(F.relu(critic1 + residual))
-        return value, policy_dist
-
-
-class GaussianActorCritic(nn.Module):
-    """
-    For a gaussian continouous environment with more than one action per state
-    """
-    def __init__(self, num_inputs, num_actions, hidden_size=512, device=torch.device('cpu'), **kwargs):
-        super(GaussianActorCritic, self).__init__()
-
-        self.num_actions = num_actions
-        self.num_inputs = num_inputs
-        self.common_linear = nn.Linear(num_inputs, hidden_size)
-        self.critic_linear = nn.Linear(hidden_size, 1)
-        self.actor_linear = nn.Linear(hidden_size, num_actions * 2)
-        self.std_bias = kwargs['std_bias']
-        self.device = device
-        utils.init_weights(self)
-
-    def forward(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
-        common = F.relu(self.common_linear(state))
-        value = self.critic_linear(common)
-        policy = self.actor_linear(common)
-        mu, sigma = torch.split(policy, policy.shape[-1]//2, 1)
-        # softplus transformation (soft relu) and a -5 bias is added
-        sigma = F.softplus(sigma - self.std_bias, beta=1)
-        if torch.isnan(mu).any() or torch.isnan(sigma).any():
-            raise
-
-        return value, torch.stack((mu, sigma))
-
-
-class DiscreteConvActorCritic(nn.Module):
-    """
-    For a discretisized continouous environment with more than one action per state
-    The difference from a regular net is that we do 2 softmaxs
-    """
-    def __init__(self, num_inputs, num_actions, hidden_size=512, device=torch.device('cpu'), num_discrete=100, **kwargs):
-        super(DiscreteConvActorCritic, self).__init__()
-        self.num_actions = num_actions
-        self.num_inputs = num_inputs
-
-        # 1 input channel, 30 out channels, 1x8 convolution
-        # out shape will be: 8 - 8 + 2*4 + 1 = 9x20 (for a 1x8 input)
-        conv1 = nn.Conv1d(1, 20, 8, padding=4)
-        self.conv_block = nn.Sequential(conv1, nn.ReLU())
-        common_linear1 = nn.Linear(9*20, hidden_size)
-        self.common_linear = nn.Sequential(common_linear1, nn.ReLU())
-        self.critic_linear = nn.Linear(hidden_size, 1)
-        self.actor_linear = nn.Linear(hidden_size, num_actions * num_discrete)
-        self.num_discrete = num_discrete
-        self.device = device
-        utils.init_weights(self)
-
-    def forward(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
-        convolved = self.conv_block(state.unsqueeze(0))
-        common = self.common_linear(torch.flatten(convolved, start_dim=1))
-        value = self.critic_linear(common)
-        policy_dist = F.softmax(self.actor_linear(common).view(self.num_actions, self.num_discrete), dim=1)
-
-        return value, policy_dist
-
-
-class GaussianConvActorCritic(nn.Module):
-    """
-    For a discretisized continouous environment with more than one action per state
-    The difference from a regular net is that we do 2 softmaxs
-    """
-    def __init__(self, num_inputs, num_actions, hidden_size=512, device=torch.device('cpu'), num_discrete=100, **kwargs):
-        super(GaussianConvActorCritic, self).__init__()
-        self.num_actions = num_actions
-        self.num_inputs = num_inputs
-        # 1 input channel, 30 out channels, 1x8 convolution
-        # out shape will be: 8 - 8 + 2*4 + 1 = 9x20 (for a 1x8 input)
-        conv1 = nn.Conv1d(1, 20, 8, padding=4)
-        self.conv_block = nn.Sequential(conv1, nn.ReLU())
-        common_linear1 = nn.Linear(9*20, hidden_size)
-        self.common_linear = nn.Sequential(common_linear1, nn.ReLU())
-        self.critic_linear = nn.Linear(hidden_size, 1)
-        self.actor_linear = nn.Linear(hidden_size, num_actions * num_discrete)
-        self.num_discrete = num_discrete
-        self.std_bias = kwargs['std_bias']
-        self.device = device
-        utils.init_weights(self)
-
-    def forward(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
-        convolved = self.conv_block(state.unsqueeze(0))
-        common = self.common_linear(torch.flatten(convolved, start_dim=1))
-        value = self.critic_linear(common)
-        policy = self.actor_linear(common)
-        mu, sigma = torch.split(policy, policy.shape[-1] // 2, 1)
-        # softplus transformation (soft relu) and a -5 bias is added
-        sigma = F.softplus(sigma - self.std_bias, beta=1)
-        if torch.isnan(mu).any() or torch.isnan(sigma).any():
-            raise
-        return value, torch.stack((mu, sigma))
-
-
-class SplitDiscreteConvActorCritic(nn.Module):
-    """
-    Both nets diverge and converge
-    The common layer is a conv layer followed by a linear one instead of just a linear
-    """
-    def __init__(self, num_inputs, num_actions, hidden_size=400, device=torch.device('cpu'), num_discrete=100, **kwargs):
-        super(SplitDiscreteConvActorCritic, self).__init__()
-        self.num_actions = num_actions
-        self.num_inputs = num_inputs
-        out_channels = hidden_size // 25
-        self.common = nn.Sequential(nn.Conv1d(1, out_channels, 8, padding=4), nn.LeakyReLU(), nn.Flatten(),
-                                    nn.Linear(9 * out_channels, hidden_size), nn.LeakyReLU())
-        self.actor = nn.Sequential(nn.Linear(hidden_size, hidden_size//2), nn.LeakyReLU(),
-                                   nn.Linear(hidden_size//2, num_actions * num_discrete))
-        self.critic1 = nn.Sequential(nn.Linear(hidden_size, hidden_size//2), nn.LeakyReLU())
-        self.critic2 = nn.Linear(hidden_size//2, 1)
-        self.residual = nn.Sequential(nn.Linear(num_actions * num_discrete, hidden_size//2), nn.LeakyReLU())
-        self.num_discrete = num_discrete
-        self.device = device
-        utils.init_weights(self)
-
-    def forward(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
-        common = self.common(state.unsqueeze(0))
-        policy_dist = F.softmax(self.actor(common).view(self.num_actions, self.num_discrete), dim=1)
-        critic1 = self.critic1(common)
-        residual = self.residual(policy_dist.flatten())
-        value = self.critic2(F.relu(critic1 + residual))
-        return value, policy_dist
-
-
-class SplitGaussianActorCritic(nn.Module):
-    """
-    Both nets diverge and converge
-    """
-    def __init__(self, num_inputs, num_actions, hidden_size=400, device=torch.device('cpu'), num_discrete=100, **kwargs):
-        super(SplitGaussianActorCritic, self).__init__()
-        self.num_actions = num_actions
-        self.num_inputs = num_inputs
-        self.common = nn.Sequential(nn.Linear(num_inputs, hidden_size), nn.LeakyReLU())
-        self.actor = nn.Sequential(nn.Linear(hidden_size, hidden_size//2), nn.LeakyReLU(),
-                                   nn.Linear(hidden_size//2, num_actions * 2))
-        self.critic1 = nn.Sequential(nn.Linear(hidden_size, hidden_size//2), nn.LeakyReLU())
-        self.critic2 = nn.Linear(hidden_size//2, 1)
-        self.residual = nn.Sequential(nn.Linear(num_actions, hidden_size//2), nn.LeakyReLU())
-        self.num_discrete = num_discrete
-        self.std_bias = kwargs['std_bias']
-        self.device = device
-        utils.init_weights(self)
-
-    def forward(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
-        common = self.common(state)
-        policy = self.actor(common)
-        mu, sigma = torch.split(policy, policy.shape[-1] // 2, 1)
-        critic1 = self.critic1(common)
-        residual = self.residual(mu.flatten())
-        value = self.critic2(F.relu(critic1 + residual))
-        # softplus transformation (soft relu) and a -5 bias is added
-        sigma = F.softplus(sigma - self.std_bias, beta=1)
-        if torch.isnan(mu).any() or torch.isnan(sigma).any():
-            raise
-        return value, torch.stack((mu, sigma))
-
-
-class SplitActorCritic(nn.Module):
-    """
-    Both nets diverge and converge
-    This is the vanilla version with no discretization (for Sokoban for example)
-    """
-    def __init__(self, num_inputs, num_actions, hidden_size=400, device=torch.device('cpu'), **kwargs):
-        super(SplitActorCritic, self).__init__()
-        self.num_actions = num_actions
-        self.num_inputs = num_inputs
-        self.common = nn.Sequential(nn.Linear(num_inputs, hidden_size), nn.LeakyReLU())
-        self.actor = nn.Sequential(nn.Linear(hidden_size, hidden_size//2), nn.LeakyReLU(),
-                                   nn.Linear(hidden_size//2, num_actions))
-        self.critic1 = nn.Sequential(nn.Linear(hidden_size, hidden_size//2), nn.LeakyReLU())
-        self.critic2 = nn.Linear(hidden_size//2, 1)
-        self.residual = nn.Sequential(nn.Linear(num_actions, hidden_size//2), nn.LeakyReLU())
-        self.device = device
-        utils.init_weights(self)
-
-    def forward(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
-        common = self.common(state)
-        policy_dist = F.softmax(self.actor(common), dim=1)
-        critic1 = self.critic1(common)
-        residual = self.residual(policy_dist.flatten())
-        value = self.critic2(F.relu(critic1 + residual))
-        return value, policy_dist
-
-
-class DoubleSplitActorCritic(nn.Module):
-    """
-    Both nets diverge and converge
-    This is the vanilla version with no discretization (for Sokoban for example)
-    """
-    def __init__(self, num_inputs, num_actions, hidden_size=400, device=torch.device('cpu'), **kwargs):
-        super(DoubleSplitActorCritic, self).__init__()
-        self.num_actions = num_actions
-        self.num_inputs = num_inputs
-        self.common = nn.Sequential(nn.Linear(num_inputs, hidden_size//2), nn.LeakyReLU(),
-                                    nn.Linear(hidden_size//2, hidden_size), nn.LeakyReLU())
-        self.actor = nn.Sequential(nn.Linear(hidden_size, hidden_size//2), nn.LeakyReLU(),
-                                   nn.Linear(hidden_size//2, num_actions))
-        self.critic1 = nn.Sequential(nn.Linear(hidden_size, hidden_size//2), nn.LeakyReLU())
-        self.critic2 = nn.Linear(hidden_size//2, 1)
-        self.residual = nn.Sequential(nn.Linear(num_actions, hidden_size//2), nn.LeakyReLU())
-        self.device = device
-        utils.init_weights(self)
-
-    def forward(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
-        common = self.common(state)
-        policy_dist = F.softmax(self.actor(common), dim=1)
-        critic1 = self.critic1(common)
-        residual = self.residual(policy_dist.flatten())
-        value = self.critic2(F.relu(critic1 + residual))
+        policy_dist = F.softmax(self.actor_linear(common), dim=1)
         return value, policy_dist
 
 
 class SimpleDQN(nn.Module):
-    def __init__(self, num_inputs, num_actions, hidden_size=512, device=torch.device('cpu'), **kwargs):
+    def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), **kwargs):
         super(SimpleDQN, self).__init__()
-        self.net = nn.Sequential(nn.Linear(num_inputs, hidden_size // 2), nn.LeakyReLU(),
+        obs_shape = obs_shape[0][0] * obs_shape[0][1]
+        self.net = nn.Sequential(nn.Linear(obs_shape, hidden_size // 2), nn.LeakyReLU(),
                                  nn.Linear(hidden_size // 2, hidden_size), nn.LeakyReLU(),
                                  nn.Linear(hidden_size, num_actions))
         self.device = device
@@ -442,27 +103,82 @@ class SimpleDQN(nn.Module):
         utils.init_weights(self)
 
     def forward(self, state):
-        if isinstance(state, torch.Tensor):
-            state = state.float().to(self.device)
+        # this happens when the state comes from the experience dataloader
+        if isinstance(state[0], torch.Tensor):
+            state = state[0].flatten(start_dim=1).float().to(self.device)
         else:
-            state = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
+            state = torch.from_numpy(state[0].flatten()).float().unsqueeze(0).to(self.device)
         return self.net(state)
 
 
-class DiscretizedDQN(nn.Module):
-    def __init__(self, num_inputs, num_actions, hidden_size=512, device=torch.device('cpu'), num_discrete=10, **kwargs):
-        super(DiscretizedDQN, self).__init__()
-        self.net = nn.Sequential(nn.Linear(num_inputs, hidden_size // 2), nn.LeakyReLU(),
-                                 nn.Linear(hidden_size // 2, hidden_size), nn.LeakyReLU(),
-                                 nn.Linear(hidden_size, num_actions * num_discrete))
+class ConvDQN(nn.Module):
+    def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), **kwargs):
+        super(ConvDQN, self).__init__()
+        y_dim = obs_shape[0][0]
+        x_dim = obs_shape[0][1]
+        # output shape: (10, y - 3 + 1, x - 3 + 1), after pooling (10, (y - 3 + 1) // 2, (x - 3 + 1) // 2)
+        self.conv1 = nn.Conv2d(1, 10, 3)
+        # output shape: (5, (y - 3 + 1) // 2 - 3 + 1, (x - 3 + 1) // 2 - 3 + 1), no pooling
+        self.conv2 = nn.Conv2d(10, 5, 3)
+        # output shape: (5, (y - 3 + 1) // 2 - 6 + 2, (x - 3 + 1) // 2 - 6 + 2),
+        # after pooling (5, ((y - 3 + 1) // 2 - 6 + 2) // 2, ((x - 3 + 1) // 2 - 6 + 2) // 2)
+        self.conv3 = nn.Conv2d(5, 16, 3)
+        vid_feature_size = (((((y_dim - 3 + 1) // 2) - 3 + 1) - 3 + 1) // 2) * \
+                           (((((x_dim - 3 + 1) // 2) - 3 + 1) - 3 + 1) // 2) * 16
+
+        self.fc1 = nn.Linear(vid_feature_size, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, num_actions)
+        self.device = device
         self.num_actions = num_actions
-        self.num_discrete = num_discrete
+        utils.init_weights(self)
+
+    def forward(self, state):
+        if isinstance(state[0], torch.Tensor):
+            state = state[0].float().unsqueeze(1).to(self.device)
+        else:
+            state = torch.from_numpy(state[0]).float().unsqueeze(0).unsqueeze(0).to(self.device)
+        vid_feature = F.max_pool2d(F.leaky_relu(self.conv1(state)), 2)
+        vid_feature = F.leaky_relu(self.conv2(vid_feature))
+        vid_feature = F.max_pool2d(F.leaky_relu(self.conv3(vid_feature)), 2)
+        vid_feature = torch.flatten(vid_feature, start_dim=1)
+        fc1 = F.leaky_relu(self.fc1(vid_feature))
+        return self.fc2(fc1)
+
+
+class ConvLSTMActorCritic(nn.Module):
+    """
+    Uses convolutional layers instead of fully connected layers
+    """
+    def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), n_layers=4, **kwargs):
+        super(ConvLSTMActorCritic, self).__init__()
+        self.num_actions = num_actions
+        y_dim = obs_shape[0][0]
+        x_dim = obs_shape[0][1]
+        # output shape: (10, y - 3 + 1, x - 3 + 1), after pooling (10, (y - 3 + 1) // 2, (x - 3 + 1) // 2)
+        self.conv1 = nn.Conv2d(1, 10, 3)
+        # output shape: (5, (y - 3 + 1) // 2 - 3 + 1, (x - 3 + 1) // 2 - 3 + 1), no pooling
+        self.conv2 = nn.Conv2d(10, 5, 3)
+        # output shape: (5, (y - 3 + 1) // 2 - 6 + 2, (x - 3 + 1) // 2 - 6 + 2),
+        # after pooling (5, ((y - 3 + 1) // 2 - 6 + 2) // 2, ((x - 3 + 1) // 2 - 6 + 2) // 2)
+        self.conv3 = nn.Conv2d(5, 16, 3)
+        vid_feature_size = (((((y_dim - 3 + 1) // 2) - 3 + 1) - 3 + 1) // 2) * \
+                           (((((x_dim - 3 + 1) // 2) - 3 + 1) - 3 + 1) // 2) * 16
+        self.common_linear = nn.Linear(vid_feature_size, hidden_size)
+        self.lstm = nn.LSTM(hidden_size, hidden_size // 4, num_layers=self.n_layers, bidirectional=False)
+        self.h0 = torch.zeros(n_layers, 1, hidden_size, device=device)
+        self.critic_linear = nn.Linear(hidden_size // 4, 1)
+        self.actor_linear = nn.Linear(hidden_size, num_actions)
         self.device = device
         utils.init_weights(self)
 
     def forward(self, state):
-        if isinstance(state, torch.Tensor):
-            state = state.float().to(self.device)
-        else:
-            state = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
-        return self.net(state).view(-1, self.num_actions, self.num_discrete).squeeze(0)
+        state = torch.from_numpy(state[0]).float().unsqueeze(0).unsqueeze(0).to(self.device)
+        vid_feature = F.max_pool2d(F.leaky_relu(self.conv1(state)), 2)
+        vid_feature = F.leaky_relu(self.conv2(vid_feature))
+        vid_feature = F.max_pool2d(F.leaky_relu(self.conv3(vid_feature)), 2)
+        vid_feature = torch.flatten(vid_feature, start_dim=1)
+        common = F.leaky_relu(self.common_linear(vid_feature))
+        lstm_out, _ = self.lstm(common, self.h0)
+        value = self.critic_linear(lstm_out)
+        policy_dist = F.softmax(self.actor_linear(common), dim=1)
+        return value, policy_dist
