@@ -51,7 +51,7 @@ class ConvActorCritic(nn.Module):
         self.critic_linear = nn.Linear(hidden_size, 1)
         self.actor_linear = nn.Linear(hidden_size, num_actions)
         self.device = device
-        utils.init_weights(self)
+        # utils.init_weights(self)
 
     def forward(self, state):
         state = torch.from_numpy(state[0]).float().unsqueeze(0).unsqueeze(0).to(self.device)
