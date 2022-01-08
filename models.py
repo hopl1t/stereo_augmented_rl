@@ -31,20 +31,21 @@ class ConvActorCritic(nn.Module):
     """
     Uses convolutional layers instead of fully connected layers
     """
-    def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), **kwargs):
+    def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), kernels=(7,4,3),
+                 channels=(16, 32, 64), **kwargs):
         super(ConvActorCritic, self).__init__()
         self.num_actions = num_actions
         y_dim = obs_shape[0][0]
         x_dim = obs_shape[0][1]
         # output shape: (10, y - 3 + 1, x - 3 + 1), after pooling (10, (y - 3 + 1) // 2, (x - 3 + 1) // 2)
-        self.conv1 = nn.Conv2d(1, 10, 3)
+        self.conv1 = nn.Conv2d(1, channels[0], kernels[0])
         # output shape: (5, (y - 3 + 1) // 2 - 3 + 1, (x - 3 + 1) // 2 - 3 + 1), no pooling
-        self.conv2 = nn.Conv2d(10, 5, 3)
+        self.conv2 = nn.Conv2d(channels[0], channels[1], kernels[1])
         # output shape: (5, (y - 3 + 1) // 2 - 6 + 2, (x - 3 + 1) // 2 - 6 + 2),
         # after pooling (5, ((y - 3 + 1) // 2 - 6 + 2) // 2, ((x - 3 + 1) // 2 - 6 + 2) // 2)
-        self.conv3 = nn.Conv2d(5, 16, 3)
-        vid_feature_size = (((((y_dim - 3 + 1) // 2) - 3 + 1) - 3 + 1) // 2) * \
-                           (((((x_dim - 3 + 1) // 2) - 3 + 1) - 3 + 1) // 2) * 16
+        self.conv3 = nn.Conv2d(channels[1], channels[2], kernels[2])
+        vid_feature_size = (((((y_dim - kernels[0] + 1) // 2) - kernels[1] + 1) - kernels[2] + 1) // 2) * \
+                           (((((x_dim - kernels[0] + 1) // 2) - kernels[1] + 1) - kernels[2] + 1) // 2) * channels[2]
         self.common_linear = nn.Linear(vid_feature_size, hidden_size)
         self.critic_linear = nn.Linear(hidden_size, 1)
         self.actor_linear = nn.Linear(hidden_size, num_actions)
