@@ -32,20 +32,21 @@ class ConvActorCritic(nn.Module):
     Uses convolutional layers instead of fully connected layers
     """
     def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), kernels=(7,4,3),
-                 channels=(16, 32, 64), **kwargs):
+                 channels=(32, 64, 64), strides=(4, 2, 1), pools=(1, 1, 1), **kwargs):
         super(ConvActorCritic, self).__init__()
         self.num_actions = num_actions
+        self.pools = pools
         y_dim = obs_shape[0][0]
         x_dim = obs_shape[0][1]
         # output shape: (10, y - 3 + 1, x - 3 + 1), after pooling (10, (y - 3 + 1) // 2, (x - 3 + 1) // 2)
-        self.conv1 = nn.Conv2d(1, channels[0], kernels[0])
+        self.conv1 = nn.Conv2d(1, channels[0], kernels[0], stride=strides[0])
         # output shape: (5, (y - 3 + 1) // 2 - 3 + 1, (x - 3 + 1) // 2 - 3 + 1), no pooling
-        self.conv2 = nn.Conv2d(channels[0], channels[1], kernels[1])
+        self.conv2 = nn.Conv2d(channels[0], channels[1], kernels[1], stride=strides[1])
         # output shape: (5, (y - 3 + 1) // 2 - 6 + 2, (x - 3 + 1) // 2 - 6 + 2),
         # after pooling (5, ((y - 3 + 1) // 2 - 6 + 2) // 2, ((x - 3 + 1) // 2 - 6 + 2) // 2)
-        self.conv3 = nn.Conv2d(channels[1], channels[2], kernels[2])
-        vid_feature_size = (((((y_dim - kernels[0] + 1) // 2) - kernels[1] + 1) - kernels[2] + 1) // 2) * \
-                           (((((x_dim - kernels[0] + 1) // 2) - kernels[1] + 1) - kernels[2] + 1) // 2) * channels[2]
+        self.conv3 = nn.Conv2d(channels[1], channels[2], kernels[2], stride=strides[2])
+        vid_feature_size = ((((((((y_dim - kernels[0]) // strides[0] + 1) // pools[0]) - kernels[1]) // strides[1] + 1) // pools[1] - kernels[2]) // strides[2] + 1) // pools[2]) * \
+                           ((((((((x_dim - kernels[0]) // strides[0] + 1) // pools[0]) - kernels[1]) // strides[1] + 1) // pools[1] - kernels[2]) // strides[2] + 1) // pools[2]) * channels[2]
         self.common_linear = nn.Linear(vid_feature_size, hidden_size)
         self.critic_linear = nn.Linear(hidden_size, 1)
         self.actor_linear = nn.Linear(hidden_size, num_actions)
@@ -54,11 +55,12 @@ class ConvActorCritic(nn.Module):
 
     def forward(self, state):
         state = torch.from_numpy(state[0]).float().unsqueeze(0).unsqueeze(0).to(self.device)
-        vid_feature = F.max_pool2d(F.leaky_relu(self.conv1(state)), 2)
-        vid_feature = F.leaky_relu(self.conv2(vid_feature))
-        vid_feature = F.max_pool2d(F.leaky_relu(self.conv3(vid_feature)), 2)
-        vid_feature = torch.flatten(vid_feature, start_dim=1)
-        common = F.leaky_relu(self.common_linear(vid_feature))
+        vid_feature = F.max_pool2d(F.relu(self.conv1(state)), self.pools[0])
+        vid_feature = F.relu(self.conv2(vid_feature))
+        vid_feature = F.max_pool2d(F.relu(self.conv3(vid_feature)), self.pools[2])
+        # vid_feature = torch.flatten(vid_feature, start_dim=1)
+        vid_feature = vid_feature.view(vid_feature.shape[0], -1)
+        common = F.relu(self.common_linear(vid_feature))
         value = self.critic_linear(common)
         policy_dist = F.softmax(self.actor_linear(common), dim=1)
         return value, policy_dist
