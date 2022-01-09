@@ -57,7 +57,6 @@ class DQNAgent:
         self.model.train()
         optimizer = optim.Adam(self.model.parameters(), lr=lr)
         scheduler = lr_scheduler.ExponentialLR(optimizer, gamma=scheduler_gamma)
-        tricks_used = 0
         steps_count = 0
 
         for episode in range(epochs):
@@ -122,8 +121,7 @@ class DQNAgent:
                             print('='*10, 'episode {}, Last 100 episodes averaged 200 points '.format(episode), '='*10)
                             return
                         if (episode % print_interval == 0) and episode != 0:
-                            utils.print_stats(self, episode, print_interval, tricks_used, steps_count)
-                            tricks_used = 0
+                            utils.print_stats(self, episode, print_interval, steps_count)
                             steps_count = 0
                         if (episode % scheduler_interval == 0) and (episode != 0):
                             scheduler.step()
