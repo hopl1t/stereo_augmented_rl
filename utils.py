@@ -19,6 +19,7 @@ except ModuleNotFoundError as e:
 
 
 class ObsType(Enum):
+    GYM = auto()
     VIDEO_ONLY = auto()
     VIDEO_NO_CLUE = auto()
     VNC_BUFFER_MONO = auto()
@@ -31,9 +32,10 @@ class ObsType(Enum):
 
 
 class ActionType(Enum):
-    ACT_WAIT = 1
-    FREE = 2
-    NO_WAIT = 3
+    GYM = auto()
+    ACT_WAIT = auto()
+    FREE = auto()
+    NO_WAIT = auto()
 
 
 class MoveType(Enum):
@@ -212,25 +214,32 @@ class EnvWrapper:
         :param kwargs: Any kwargs you want to pass to make()
         """
         self.obs_type = obs_type
-        self.env = retro.make(game=env_name, inttype=retro.data.Integrations.ALL)  # 'skeleton_plus'
+        if env_name == 'skeleton_plus':
+            self.env = retro.make(game=env_name, inttype=retro.data.Integrations.ALL)  # 'skeleton_plus'
+        elif env_name == 'CartPole-v1':
+            self.env = gym.make(env_name)
+        else:
+            raise NotImplementedError
         self.env_name = env_name
         self.env.max_steps = max_steps
         self.max_steps = max_steps
         self.action_type = action_type
         self.compression_rate = compression_rate
-        self.discretisizer = Discretizer(self.env, [['UP'], ['LEFT'], ['RIGHT'], ['BUTTON'], [None]])
+        if env_name == 'skeleton_plus':
+            self.discretisizer = Discretizer(self.env, [['UP'], ['LEFT'], ['RIGHT'], ['BUTTON'], [None]])
         self.health = 99
         self.score = 0
         self.kill_hp_ratio = kill_hp_ratio
         self.debug = debug
         self.time_penalty = time_penalty
         obs_shape = self.env.observation_space.shape
-        compressed_y_shape = (int(np.ceil(obs_shape[0] / self.compression_rate)))
-        compressed_x_shape = (int(np.ceil(obs_shape[1] / self.compression_rate)))
+        if self.obs_type != ObsType.GYM:
+            compressed_y_shape = (int(np.ceil(obs_shape[0] / self.compression_rate)))
+            compressed_x_shape = (int(np.ceil(obs_shape[1] / self.compression_rate)))
         # self.obs shape: ((y_dim, x_dim), audio)
         if obs_type == ObsType.VIDEO_ONLY or obs_type == ObsType.VIDEO_NO_CLUE:
             self.obs_shape = ((compressed_y_shape, compressed_x_shape), 0)
-        if obs_type == ObsType.VIDEO_CONV:
+        elif obs_type == ObsType.VIDEO_CONV:
             self.obs_shape = ((compressed_y_shape, compressed_x_shape), 0)
         elif obs_type == ObsType.VNC_BUFFER_MONO:
             self.obs_shape = ((compressed_y_shape, compressed_x_shape), AUDIO_BUFFER_SIZE)
@@ -242,6 +251,8 @@ class EnvWrapper:
             self.obs_shape = ((compressed_y_shape, compressed_x_shape), 2)
         elif obs_type == ObsType.VNC_FOURIER_STEREO:
             self.obs_shape = ((compressed_y_shape, compressed_x_shape), 4)  # frequency left + max vol, frequency right + max vol
+        elif obs_type == ObsType.GYM:
+            self.obs_shape = ((obs_shape[0], 1), 1)
 
         if action_type == ActionType.ACT_WAIT:
             self.num_actions = len(MoveType)
@@ -250,6 +261,8 @@ class EnvWrapper:
             raise NotImplementedError
         elif action_type == ActionType.NO_WAIT:
             raise NotImplementedError
+        elif action_type == ActionType.GYM:
+            self.num_actions = self.env.action_space.n
 
     def reset(self):
         obs = self.env.reset()
@@ -267,6 +280,8 @@ class EnvWrapper:
                 reward2 = 0
             reward = reward1 + reward2
             done = done1 | done2
+        elif self.action_type == ActionType.GYM:
+            obs, reward, done, info = self.env.step(action)
         else:
             raise NotImplementedError
         obs = self.process_obs(obs)
@@ -360,6 +375,8 @@ class EnvWrapper:
             max_stereo = stereo.max(axis=0).astype(np.int16)
             max_stereo = self.normalize_sound(max_stereo)
             obs = (self.compress_obs(obs), max_stereo)
+        elif self.obs_type == ObsType.GYM:
+            obs = (obs, np.zeros(SPECTOGRAM_SIZE))
         elif self.obs_type == ObsType.VNC_FOURIER_STEREO:
             raise NotImplementedError
 

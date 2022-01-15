@@ -10,8 +10,6 @@ import time
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-EPSILON_MIN = 0.01
-
 
 class DQNAgent:
     """
@@ -34,7 +32,7 @@ class DQNAgent:
     def train(self, epochs: int, trajectory_len: int, env_gen: utils.AsyncEnvGen, lr=1e-4,
               discount_gamma=0.99, scheduler_gamma=0.98, beta=1e-3, print_interval=1000, log_interval=1000,
               save_interval=10000, scheduler_interval=1000, no_per=False, no_cuda=False, epsilon=0,
-              epsilon_decay=0.997, eval_interval=0, stop_trick_at=0, batch_size=64, **kwargs):
+              epsilon_decay=0.997, eval_interval=0, stop_trick_at=0, batch_size=64, epsilon_min=0.01, **kwargs):
         """
         Trains the model
         :param epochs: int, number of epochs to run
@@ -115,7 +113,7 @@ class DQNAgent:
                                              .format('*' * 10, episode))
                             utils.save_agent(self)
                             return
-                        if epsilon > EPSILON_MIN:
+                        if epsilon > epsilon_min:
                             epsilon *= epsilon_decay
                         if np.mean(self.all_rewards[-100:]) >= 200:
                             print('='*10, 'episode {}, Last 100 episodes averaged 200 points '.format(episode), '='*10)

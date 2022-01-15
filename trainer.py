@@ -48,6 +48,8 @@ def main(raw_args):
                                                             ' Default is 0 and then epsilon-soft is used', default=0)
     parser.add_argument('-epsilon_decay', type=float, nargs='?', help='Epsilon decay for epsilon greedy policy (DQN only). '
                                                                   'Default is 0.997', default=0.997)
+    parser.add_argument('-epsilon_min', type=float, nargs='?', help='Minimal epsilon for esp-greedy dqn. '
+                                                                    'Default is 0.01', default=0.01)
     parser.add_argument('-std_bias', type=float, nargs='?', help='std bias for softplus rectification if using gaussian'
                         , default=5)
     parser.add_argument('-print_interval', type=int, nargs='?', help='Print stats to screen evey x steps', default=1000)
@@ -116,7 +118,7 @@ def main(raw_args):
                     args.print_interval, args.log_interval, scheduler_interval=args.scheduler_interval,
                     clip_gradient=args.clip_gradient, no_per=args.no_PER, no_cuda=args.no_cuda,
                     save_interval=args.save_interval, epsilon=args.epsilon, epsilon_decay=args.epsilon_decay,
-                    eval_interval=args.eval_interval, batch_size=args.batch_size)
+                    eval_interval=args.eval_interval, batch_size=args.batch_size, epsilon_min=args.epsilon_min)
     except Exception as e:
         raise e
     finally:
