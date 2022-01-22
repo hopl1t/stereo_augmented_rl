@@ -6,6 +6,7 @@ import utils
 import pickle
 from datetime import datetime
 import retro
+import torch
 from utils import Discretizer
 from a2c_agent import A2CAgent # Don't remove this
 from dqn_agent import DQNAgent # Don't remove this
@@ -100,6 +101,13 @@ def main(raw_args):
     # obs_size = 2120
     # num_actions = 5
 
+    if torch.cuda.is_available() and not args.no_cuda:
+        device = torch.device('cuda')
+        sys.stdout.write('Using CUDA\n')
+    else:
+        device = torch.device('cpu')
+        sys.stdout.write('Using CPU\n')
+
     if args.load:
         with open(args.load, 'rb') as f:
             agent = pickle.load(f)
@@ -108,7 +116,7 @@ def main(raw_args):
             agent.env.discretisizer = Discretizer(envs[0].env, [['UP'], ['LEFT'], ['RIGHT'], ['BUTTON'], [None]])
     else:
         model = getattr(models, args.model)(obs_shape, num_actions, hidden_size=args.hidden_size,
-                                            num_discrete=args.num_discrete, std_bias=args.std_bias)
+                                            num_discrete=args.num_discrete, std_bias=args.std_bias, device=device)
         timestamp = datetime.now().strftime('%y%m%d%H%m')
         save_path = os.path.join(args.save_dir, '{0}_{1}_{2}.pkl'.format(args.model, args.env, timestamp))
         log_path = os.path.join(args.log_dir, '{0}_{1}_{2}.log'.format(args.model, args.env, timestamp))
@@ -124,7 +132,7 @@ def main(raw_args):
                     clip_gradient=args.clip_gradient, no_per=args.no_PER, no_cuda=args.no_cuda,
                     save_interval=args.save_interval, epsilon=args.epsilon, epsilon_decay=args.epsilon_decay,
                     eval_interval=args.eval_interval, batch_size=args.batch_size, epsilon_min=args.epsilon_min,
-                    epsilon_bounded=args.epsilon_bounded)
+                    epsilon_bounded=args.epsilon_bounded, device=device)
     except Exception as e:
         raise e
     finally:

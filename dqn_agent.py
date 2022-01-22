@@ -33,9 +33,9 @@ class DQNAgent:
 
     def train(self, epochs: int, trajectory_len: int, env_gen: utils.AsyncEnvGen, lr=1e-4,
               discount_gamma=0.99, scheduler_gamma=0.98, beta=1e-3, print_interval=1000, log_interval=1000,
-              save_interval=10000, scheduler_interval=1000, no_per=False, no_cuda=False, epsilon=0,
+              save_interval=10000, scheduler_interval=1000, no_per=False, epsilon=0,
               epsilon_decay=0.997, eval_interval=0, stop_trick_at=0, batch_size=64, epsilon_min=0.01,
-              epsilon_bounded=False, **kwargs):
+              epsilon_bounded=False, device=torch.device('cpu'), **kwargs):
         """
         Trains the model
         :param epochs: int, number of epochs to run
@@ -47,12 +47,6 @@ class DQNAgent:
         :param beta: float, information gain factor
         :return:
         """
-        if torch.cuda.is_available() and not no_cuda:
-            device = torch.device('cuda')
-            sys.stdout.write('Using CUDA\n')
-        else:
-            device = torch.device('cpu')
-            sys.stdout.write('Using CPU\n')
         self.model.to(device)
         self.model.device = device
         self.model.train()
