@@ -90,7 +90,8 @@ class DQNAgent:
                     if self.is_lstm:
                         # No shuffeling for LSTM!
                         dataloader = DataLoader(dataset, batch_size=min(len(dataset), batch_size), shuffle=False)
-                        self.model.reset_hidden(batch_size=batch_size)
+                        # self.model.reset_hidden(batch_size=batch_size)
+                        self.model.reset_hidden(batch_size=1)  # trying to use the batch as a sequence
                     else:
                         dataloader = DataLoader(dataset, batch_size=min(len(dataset), batch_size), shuffle=True)
                     for states, action_idxs, rewards, new_states, dones in dataloader:
@@ -106,7 +107,8 @@ class DQNAgent:
                         loss = F.mse_loss(predictions, targets_full.float())
                         if self.is_lstm:
                             loss.backward(retain_graph=True)
-                            self.model.reset_hidden(batch_size=batch_size)
+                            self.model.reset_hidden(batch_size=1)  # trying to use the batch as a sequence
+                            # self.model.reset_hidden(batch_size=batch_size)
                         else:
                             loss.backward()
                         optimizer.step()

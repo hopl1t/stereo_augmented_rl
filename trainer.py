@@ -65,6 +65,7 @@ def main(raw_args):
     parser.add_argument('-hidden_size', type=int, nargs='?', help='Size of largest hidden layer', default=512)
     parser.add_argument('-save_interval', type=int, nargs='?', help='Save every x episodes', default=10000)
     parser.add_argument('-batch_size', type=int, nargs='?', help='Batch size for PER', default=64)
+    parser.add_argument('-lstm_layers', type=int, nargs='?', help='number of lstm layers if used', default=2)
     parser.add_argument('-eval_interval', type=int, nargs='?', help='Evaluate model every x steps.'
                                                                     ' 0 is don\'t eval during training', default=0)
     parser.add_argument('-compression_rate', type=int, nargs='?', help='Video compression rate for Skeleton+. '
@@ -87,6 +88,7 @@ def main(raw_args):
     args = parser.parse_args(raw_args)
     assert os.path.isdir(args.save_dir)
     assert os.path.isdir(args.log_dir)
+    assert ~args.no_PER^('lstm' in args.model.lower())  # can't have PER and LSTM together
 
     envs = [utils.EnvWrapper(args.env, utils.ObsType[args.obs_type], utils.ActionType[args.action_type],
             args.max_len, num_discrete=args.num_discrete, debug=args.debug, time_penalty=args.time_penalty)
@@ -116,7 +118,8 @@ def main(raw_args):
             agent.env.discretisizer = Discretizer(envs[0].env, [['UP'], ['LEFT'], ['RIGHT'], ['BUTTON'], [None]])
     else:
         model = getattr(models, args.model)(obs_shape, num_actions, hidden_size=args.hidden_size,
-                                            num_discrete=args.num_discrete, std_bias=args.std_bias, device=device)
+                                            num_discrete=args.num_discrete, std_bias=args.std_bias, device=device,
+                                            num_lstm_layers=args.lstm_layers)
         timestamp = datetime.now().strftime('%y%m%d%H%m')
         save_path = os.path.join(args.save_dir, '{0}_{1}_{2}.pkl'.format(args.model, args.env, timestamp))
         log_path = os.path.join(args.log_dir, '{0}_{1}_{2}.log'.format(args.model, args.env, timestamp))

@@ -152,6 +152,8 @@ class ConvDQN(nn.Module):
 def init_hidden(n_layers, hidden_size, device, batch_size=1):
     # tuple is for h_0 and c_0 - (h_0, c_0) and not for video and audio!
     # notice the shape: (sequence_len, batch_size, input_size)
+    # not sure why both h_0  and c_0 have shape[0] = num_lstm_layers, as if I understand correctly they should be
+    #  sequenantial. Nevertheless, this is what the docs say and it seems to work on CartPole
     return (torch.zeros(n_layers, batch_size, hidden_size, device=torch.device(device)),
             torch.zeros(n_layers, batch_size, hidden_size, device=torch.device(device)))
 
@@ -169,10 +171,10 @@ class LSTMActorCritic(nn.Module):
         self.num_actions = num_actions
         obs_shape = obs_shape[0][0] * obs_shape[0][1]
         self.common_linear = nn.Linear(obs_shape, hidden_size)
-        self.lstm = nn.LSTM(hidden_size, hidden_size // 4, num_layers=num_lstm_layers, bidirectional=False)
+        self.lstm = nn.LSTM(hidden_size, hidden_size, num_layers=num_lstm_layers, bidirectional=False)
         self.reset_hidden()
-        self.critic_linear = nn.Linear(hidden_size // 4, 1)
-        self.actor_linear = nn.Linear(hidden_size // 4, num_actions)
+        self.critic_linear = nn.Linear(hidden_size, 1)
+        self.actor_linear = nn.Linear(hidden_size, num_actions)
         utils.init_weights(self)
 
     def forward(self, state):
@@ -186,20 +188,20 @@ class LSTMActorCritic(nn.Module):
         return value, policy_dist
 
     def reset_hidden(self):
-        self.prev_hidden = init_hidden(self.num_lstm_layers, self.hidden_size // 4, self.device)
+        self.prev_hidden = init_hidden(self.num_lstm_layers, self.hidden_size, self.device)
 
 
 class LSTMDQN(nn.Module):
-    def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), num_lstm_layers=4, **kwargs):
+    def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), num_lstm_layers=2, **kwargs):
         super(LSTMDQN, self).__init__()
         self.num_lstm_layers = num_lstm_layers
         self.hidden_size = hidden_size
         self.num_actions = num_actions
         obs_shape = obs_shape[0][0] * obs_shape[0][1]
         self.fc1 = nn.Linear(obs_shape, hidden_size)
-        self.lstm = nn.LSTM(hidden_size, hidden_size // 4, num_layers=num_lstm_layers, bidirectional=False)
-        self.prev_hidden = init_hidden(num_lstm_layers, hidden_size // 4, device)
-        self.fc2 = nn.Linear(hidden_size // 4, num_actions)
+        self.lstm = nn.LSTM(hidden_size, hidden_size, num_layers=num_lstm_layers, bidirectional=False)
+        self.prev_hidden = init_hidden(num_lstm_layers, hidden_size, device)
+        self.fc2 = nn.Linear(hidden_size, num_actions)
         self.device = device
         utils.init_weights(self)
 
@@ -210,19 +212,22 @@ class LSTMDQN(nn.Module):
             state = state[0].flatten(start_dim=1).float().to(self.device)
         else:
             state = torch.from_numpy(state[0].flatten()).float().unsqueeze(0).to(self.device)
-        hidden1 = F.leaky_relu(self.fc1(state)).unsqueeze(0)  # shape = (L, N, H)
+        # shape = (L, N, H) => sequence_len [1 for real-time and |batch| for replay!], batch size [allways 1! also when using replay!], input_size,
+        hidden1 = F.leaky_relu(self.fc1(state)).unsqueeze(1)
         # TODO: currently the dqn agent does not support lstm - this is because the agent calculates the grad using
         # replay (regardless of PER) - and the replay needs to be adjusted for: 1. keep score of
-        if hidden1.shape[1] != self.prev_hidden[0].shape[1]:  # last batch in loader might not fit tightly
-            max_batch_size = self.prev_hidden[0].shape[-1]
-            true_batch_size = hidden1.shape[1]
-            self.prev_hidden = tuple([hidden.narrow(1, max_batch_size - true_batch_size,
-                                                    true_batch_size) for hidden in self.prev_hidden])
+        # if hidden1.shape[1] != self.prev_hidden[0].shape[1]:  # last batch in loader might not fit tightly
+        #     max_batch_size = self.prev_hidden[0].shape[-1]
+        #     true_batch_size = hidden1.shape[1]
+        #     self.prev_hidden = tuple([hidden.narrow(1, max_batch_size - true_batch_size,
+        #                                             true_batch_size) for hidden in self.prev_hidden])
         lstm_out, lstm_hidden = self.lstm(hidden1, self.prev_hidden)
+        # return back to a shape of (L, N, H): IE batch first
+        lstm_out = lstm_out.swapaxes(0, 1)
         self.prev_hidden = lstm_hidden
         lstm_out = lstm_out.squeeze(0)
         return self.fc2(lstm_out)
 
     def reset_hidden(self, batch_size=1):
-        self.prev_hidden = init_hidden(self.num_lstm_layers, self.hidden_size // 4, self.device, batch_size)
+        self.prev_hidden = init_hidden(self.num_lstm_layers, self.hidden_size, self.device, batch_size)
 
