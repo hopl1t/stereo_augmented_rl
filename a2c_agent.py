@@ -7,7 +7,7 @@ from torch.optim import lr_scheduler
 import torch.nn.functional as F
 import utils
 import time
-from torch.nn.modules.rnn import LSTM
+from torch.nn.modules.rnn import LSTM, LSTMCell
 
 
 class A2CAgent:
@@ -28,7 +28,7 @@ class A2CAgent:
         self.all_times = []
         self.log_buffer = []
         self.traj_lengths = []
-        self.is_lstm = any([isinstance(module, LSTM) for module in model.modules()])
+        self.is_lstm = any([isinstance(module, (LSTM, LSTMCell)) for module in model.modules()])
 
     def train(self, epochs: int, trajectory_len: int, env_gen: utils.AsyncEnvGen, lr=1e-4,
               discount_gamma=0.99, scheduler_gamma=0.98, beta=1e-3, print_interval=1000, log_interval=1000,

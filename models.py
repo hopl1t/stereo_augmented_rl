@@ -160,7 +160,7 @@ class LSTMActorCritic(nn.Module):
     """
     LTSM
     """
-    def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), num_lstm_layers=4, **kwargs):
+    def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), num_lstm_layers=2, **kwargs):
         super(LSTMActorCritic, self).__init__()
         self.prev_hidden = None
         self.device = device
@@ -178,8 +178,8 @@ class LSTMActorCritic(nn.Module):
     def forward(self, state):
         state = torch.from_numpy(state[0].flatten()).float().unsqueeze(0).unsqueeze(0).to(self.device)
         common = F.leaky_relu(self.common_linear(state))
-        lstm_out, hidden = self.lstm(common, self.prev_hidden)
-        self.prev_hidden = hidden
+        lstm_out, lstm_hidden = self.lstm(common, self.prev_hidden)
+        self.prev_hidden = lstm_hidden
         lstm_out = lstm_out.squeeze(0)
         value = self.critic_linear(lstm_out)
         policy_dist = F.softmax(self.actor_linear(lstm_out), dim=1)
