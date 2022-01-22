@@ -191,6 +191,43 @@ class LSTMActorCritic(nn.Module):
         self.prev_hidden = init_hidden(self.num_lstm_layers, self.hidden_size, self.device)
 
 
+class CONVLSTMActorCritic(nn.Module):
+    """
+    LTSM
+    """
+    def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), num_lstm_layers=2,
+                 kernels = (7, 4, 3), channels = (32, 64, 64), strides = (4, 2, 1), pools = (1, 1,1), **kwargs):
+        super(CONVLSTMActorCritic, self).__init__()
+        self.prev_hidden = None
+        self.device = device
+        self.num_lstm_layers = num_lstm_layers
+        self.hidden_size = hidden_size
+        self.num_actions = num_actions
+        self.pools = pools
+        y_dim = obs_shape[0][0]
+        x_dim = obs_shape[0][1]
+        self.cnn = CNN(y_dim, x_dim, num_actions, hidden_size, device, kernels, channels, strides, pools)
+        self.lstm = nn.LSTM(hidden_size, hidden_size, num_layers=num_lstm_layers, bidirectional=False)
+        self.reset_hidden()
+        self.critic_linear = nn.Linear(hidden_size, 1)
+        self.actor_linear = nn.Linear(hidden_size, num_actions)
+        utils.init_weights(self)
+
+    def forward(self, state):
+        state = torch.from_numpy(state[0]).float().unsqueeze(0).unsqueeze(0).to(self.device)
+        common = self.cnn(state).unsqueeze(0)
+        lstm_out, lstm_hidden = self.lstm(common, self.prev_hidden)
+        self.prev_hidden = lstm_hidden
+        lstm_out = lstm_out.squeeze(0)
+        value = self.critic_linear(lstm_out)
+        policy_dist = F.softmax(self.actor_linear(lstm_out), dim=1)
+        return value, policy_dist
+
+    def reset_hidden(self):
+        self.prev_hidden = init_hidden(self.num_lstm_layers, self.hidden_size, self.device)
+
+
+
 class LSTMDQN(nn.Module):
     def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), num_lstm_layers=2, **kwargs):
         super(LSTMDQN, self).__init__()
