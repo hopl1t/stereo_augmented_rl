@@ -38,7 +38,7 @@ def main(raw_args):
                         help='Type of action to use - wither ACT_WAIT, FREE, NO_WAIT', default='ACT_WAIT')
     parser.add_argument('-epochs', type=int, nargs='?', help='Num epochs (episodes) to train', default=5000)
     parser.add_argument('-time_penalty', type=float, nargs='?', help='penalty for each turn', default=0.005)
-    parser.add_argument('-trajectory_len', type=int, nargs='?', help='Maximal length of single trajectory', default=5000)
+    parser.add_argument('-trajectory_len', type=int, nargs='?', help='Maximal length of single trajectory', default=100)  # this used to be 5000
     parser.add_argument('-lr', type=float, nargs='?', help='Learning rate', default=5e-3)
     parser.add_argument('-discount_gamma', type=float, nargs='?', help='Discount factor', default=0.99)
     parser.add_argument('-scheduler_gamma', type=float, nargs='?', help='Scheduling factor', default=0.95)
@@ -50,12 +50,17 @@ def main(raw_args):
                                                                   'Default is 0.997', default=0.997)
     parser.add_argument('-epsilon_min', type=float, nargs='?', help='Minimal epsilon for esp-greedy dqn. '
                                                                     'Default is 0.01', default=0.01)
+    parser.add_argument('-epsilon_bounded', action='store_true', help='Flag. If stated uses epsilon soft and greedy '
+                                                                      'together such that a completly random policy is '
+                                                                      'executed in a probability that equals the '
+                                                                      'epsilon_min param. Otherwise an epsilon soft '
+                                                                      'action is chosen', default=False)
     parser.add_argument('-std_bias', type=float, nargs='?', help='std bias for softplus rectification if using gaussian'
                         , default=5)
     parser.add_argument('-print_interval', type=int, nargs='?', help='Print stats to screen evey x steps', default=1000)
     parser.add_argument('-log_interval', type=int, nargs='?', help='Log stats to file evey x steps. '
                                                                    'Set 0 for no logs at all', default=1000)
-    parser.add_argument('-max_len', type=int, nargs='?', help='Maximal steps for a single episode', default=5000)
+    parser.add_argument('-max_len', type=int, nargs='?', help='Maximal steps for a single episode', default=50000)  # this used to be 5000
     parser.add_argument('-hidden_size', type=int, nargs='?', help='Size of largest hidden layer', default=512)
     parser.add_argument('-save_interval', type=int, nargs='?', help='Save every x episodes', default=10000)
     parser.add_argument('-batch_size', type=int, nargs='?', help='Batch size for PER', default=64)
@@ -118,7 +123,8 @@ def main(raw_args):
                     args.print_interval, args.log_interval, scheduler_interval=args.scheduler_interval,
                     clip_gradient=args.clip_gradient, no_per=args.no_PER, no_cuda=args.no_cuda,
                     save_interval=args.save_interval, epsilon=args.epsilon, epsilon_decay=args.epsilon_decay,
-                    eval_interval=args.eval_interval, batch_size=args.batch_size, epsilon_min=args.epsilon_min)
+                    eval_interval=args.eval_interval, batch_size=args.batch_size, epsilon_min=args.epsilon_min,
+                    epsilon_bounded=args.epsilon_bounded)
     except Exception as e:
         raise e
     finally:

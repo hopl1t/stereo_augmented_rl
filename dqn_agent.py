@@ -9,6 +9,7 @@ import utils
 import time
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from torch.nn.modules.rnn import LSTM
 
 
 class DQNAgent:
@@ -28,11 +29,13 @@ class DQNAgent:
         self.all_rewards = []
         self.all_times = []
         self.log_buffer = []
+        self.is_lstm = any([isinstance(module, LSTM) for module in model.modules()])
 
     def train(self, epochs: int, trajectory_len: int, env_gen: utils.AsyncEnvGen, lr=1e-4,
               discount_gamma=0.99, scheduler_gamma=0.98, beta=1e-3, print_interval=1000, log_interval=1000,
               save_interval=10000, scheduler_interval=1000, no_per=False, no_cuda=False, epsilon=0,
-              epsilon_decay=0.997, eval_interval=0, stop_trick_at=0, batch_size=64, epsilon_min=0.01, **kwargs):
+              epsilon_decay=0.997, eval_interval=0, stop_trick_at=0, batch_size=64, epsilon_min=0.01,
+              epsilon_bounded=False, **kwargs):
         """
         Trains the model
         :param epochs: int, number of epochs to run
@@ -73,7 +76,7 @@ class DQNAgent:
                 steps_count += 1
                 with torch.no_grad():
                     q_vals = self.model.forward(state)
-                    action, action_idx = self.env.on_policy(q_vals, epsilon)
+                    action, action_idx = self.env.on_policy(q_vals, epsilon, eps_bounded=epsilon_bounded)
                     new_state, reward, done, info = self.env.step(action)
                     new_q_vals = self.model.forward(new_state).detach()
                     new_q = self.env.off_policy(new_q_vals)
@@ -90,7 +93,12 @@ class DQNAgent:
 
                 if done or ((step % trajectory_len == 0) and step != 0):
                     dataset = utils.PERDataLoader(experience, use_per=(not no_per))
-                    dataloader = DataLoader(dataset, batch_size=min(len(dataset), batch_size), shuffle=True)
+                    if self.is_lstm:
+                        # No shuffeling for LSTM!
+                        dataloader = DataLoader(dataset, batch_size=min(len(dataset), batch_size), shuffle=False)
+                        self.model.reset_hidden(batch_size=batch_size)
+                    else:
+                        dataloader = DataLoader(dataset, batch_size=min(len(dataset), batch_size), shuffle=True)
                     for states, action_idxs, rewards, new_states, dones in dataloader:
                         with torch.no_grad():
                             new_qs = self.model(new_states)
@@ -102,9 +110,15 @@ class DQNAgent:
                         targets_full.scatter_(-1, action_idxs.squeeze(-1).to(device), targets.float())
                         optimizer.zero_grad()
                         loss = F.mse_loss(predictions, targets_full.float())
-                        loss.backward()
+                        if self.is_lstm:
+                            loss.backward(retain_graph=True)
+                            self.model.reset_hidden(batch_size=batch_size)
+                        else:
+                            loss.backward()
                         optimizer.step()
                     if done:
+                        if self.is_lstm:
+                            self.model.reset_hidden()
                         self.all_times.append(time.time() - ep_start_time)
                         self.all_rewards.append(np.sum(episode_rewards))
                         self.all_lengths.append(step)
@@ -129,7 +143,7 @@ class DQNAgent:
                         if log_interval and (episode % log_interval == 0) and (episode != 0):
                             utils.log(self)
                         if eval_interval:
-                            if episode % eval_interval == 0:
+                            if ((episode % eval_interval)  == 0 ) and (episode != 0):
                                 _, all_episode_rewards, completed_sokoban_levels = utils.evaluate(self, 100, render=False)
                                 utils.print_eval(all_episode_rewards, completed_sokoban_levels)
                                 if np.mean(all_episode_rewards) >= 200:

@@ -7,6 +7,7 @@ from torch.optim import lr_scheduler
 import torch.nn.functional as F
 import utils
 import time
+from torch.nn.modules.rnn import LSTM
 
 
 class A2CAgent:
@@ -27,6 +28,7 @@ class A2CAgent:
         self.all_times = []
         self.log_buffer = []
         self.traj_lengths = []
+        self.is_lstm = any([isinstance(module, LSTM) for module in model.modules()])
 
     def train(self, epochs: int, trajectory_len: int, env_gen: utils.AsyncEnvGen, lr=1e-4,
               discount_gamma=0.99, scheduler_gamma=0.98, beta=1e-3, print_interval=1000, log_interval=1000,
@@ -99,7 +101,11 @@ class A2CAgent:
                     critic_loss = F.smooth_l1_loss(traj_values, returns).sum()
                     ac_loss = (actor_loss + critic_loss + beta * traj_entropy_term)
                     optimizer.zero_grad()
-                    ac_loss.backward()
+                    if self.is_lstm:
+                        ac_loss.backward(retain_graph=True)
+                        self.model.reset_hidden()
+                    else:
+                        ac_loss.backward()
                     if clip_gradient:
                         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 0.5)
                     optimizer.step()

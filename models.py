@@ -149,57 +149,80 @@ class ConvDQN(nn.Module):
         return self.fc(vid_features)
 
 
-def init_hidden(n_layers, hidden_size, device):
-    return (torch.zeros(n_layers, 1, hidden_size, device=torch.device(device)),
-            torch.zeros(n_layers, 1, hidden_size, device=torch.device(device)))
+def init_hidden(n_layers, hidden_size, device, batch_size=1):
+    # tuple is for h_0 and c_0 - (h_0, c_0) and not for video and audio!
+    # notice the shape: (sequence_len, batch_size, input_size)
+    return (torch.zeros(n_layers, batch_size, hidden_size, device=torch.device(device)),
+            torch.zeros(n_layers, batch_size, hidden_size, device=torch.device(device)))
 
 
 class LSTMActorCritic(nn.Module):
     """
-    Uses convolutional layers instead of fully connected layers
+    LTSM
     """
-    def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), n_layers=4, **kwargs):
+    def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), num_lstm_layers=4, **kwargs):
         super(LSTMActorCritic, self).__init__()
-        self.num_actions = num_actions
-        self.common_linear = nn.Linear(obs_shape, hidden_size)
-        self.lstm = nn.LSTM(hidden_size, hidden_size // 4, num_layers=self.n_layers, bidirectional=False)
-        self.h0 = init_hidden(n_layers, hidden_size, device)
-        self.critic_linear = nn.Linear(hidden_size // 4, 1)
-        self.actor_linear = nn.Linear(hidden_size, num_actions)
+        self.prev_hidden = None
         self.device = device
-        utils.init_weights(self)
-
-    def forward(self, state):
-        state = torch.from_numpy(state[0]).float().unsqueeze(0).unsqueeze(0).to(self.device)
-        vid_feature = F.max_pool2d(F.leaky_relu(self.conv1(state)), 2)
-        vid_feature = F.leaky_relu(self.conv2(vid_feature))
-        vid_feature = F.max_pool2d(F.leaky_relu(self.conv3(vid_feature)), 2)
-        vid_feature = torch.flatten(vid_feature, start_dim=1)
-        common = F.leaky_relu(self.common_linear(vid_feature))
-        lstm_out, _ = self.lstm(common, self.h0)
-        value = self.critic_linear(lstm_out)
-        policy_dist = F.softmax(self.actor_linear(common), dim=1)
-        return value, policy_dist
-
-
-class CommonActorCritic(nn.Module):
-    """
-    First FC layer is common between both nets
-    """
-    def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), **kwargs):
-        super(CommonActorCritic, self).__init__()
+        self.num_lstm_layers = num_lstm_layers
+        self.hidden_size = hidden_size
         self.num_actions = num_actions
         obs_shape = obs_shape[0][0] * obs_shape[0][1]
         self.common_linear = nn.Linear(obs_shape, hidden_size)
-        self.critic_linear = nn.Linear(hidden_size, 1)
-        self.actor_linear = nn.Linear(hidden_size, num_actions)
+        self.lstm = nn.LSTM(hidden_size, hidden_size // 4, num_layers=num_lstm_layers, bidirectional=False)
+        self.reset_hidden()
+        self.critic_linear = nn.Linear(hidden_size // 4, 1)
+        self.actor_linear = nn.Linear(hidden_size // 4, num_actions)
+        utils.init_weights(self)
+
+    def forward(self, state):
+        state = torch.from_numpy(state[0].flatten()).float().unsqueeze(0).unsqueeze(0).to(self.device)
+        common = F.leaky_relu(self.common_linear(state))
+        lstm_out, hidden = self.lstm(common, self.prev_hidden)
+        self.prev_hidden = hidden
+        lstm_out = lstm_out.squeeze(0)
+        value = self.critic_linear(lstm_out)
+        policy_dist = F.softmax(self.actor_linear(lstm_out), dim=1)
+        return value, policy_dist
+
+    def reset_hidden(self):
+        self.prev_hidden = init_hidden(self.num_lstm_layers, self.hidden_size // 4, self.device)
+
+
+class LSTMDQN(nn.Module):
+    def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), num_lstm_layers=4, **kwargs):
+        super(LSTMDQN, self).__init__()
+        self.num_lstm_layers = num_lstm_layers
+        self.hidden_size = hidden_size
+        self.num_actions = num_actions
+        obs_shape = obs_shape[0][0] * obs_shape[0][1]
+        self.fc1 = nn.Linear(obs_shape, hidden_size)
+        self.lstm = nn.LSTM(hidden_size, hidden_size // 4, num_layers=num_lstm_layers, bidirectional=False)
+        self.prev_hidden = init_hidden(num_lstm_layers, hidden_size // 4, device)
+        self.fc2 = nn.Linear(hidden_size // 4, num_actions)
         self.device = device
         utils.init_weights(self)
 
     def forward(self, state):
-        state = torch.from_numpy(state[0].flatten()).float().unsqueeze(0).to(self.device)
-        common = F.leaky_relu(self.common_linear(state))
-        value = self.critic_linear(common)
-        policy_dist = F.softmax(self.actor_linear(common), dim=1)
+        # this happens when the state comes from the experience dataloader
+        # this also affects how much we unsqueeze - as states from the dataloader are already in batchs!
+        if isinstance(state[0], torch.Tensor):
+            state = state[0].flatten(start_dim=1).float().to(self.device)
+        else:
+            state = torch.from_numpy(state[0].flatten()).float().unsqueeze(0).to(self.device)
+        hidden1 = F.leaky_relu(self.fc1(state)).unsqueeze(0)  # shape = (L, N, H)
+        # TODO: currently the dqn agent does not support lstm - this is because the agent calculates the grad using
+        # replay (regardless of PER) - and the replay needs to be adjusted for: 1. keep score of
+        if hidden1.shape[1] != self.prev_hidden[0].shape[1]:  # last batch in loader might not fit tightly
+            max_batch_size = self.prev_hidden[0].shape[-1]
+            true_batch_size = hidden1.shape[1]
+            self.prev_hidden = tuple([hidden.narrow(1, max_batch_size - true_batch_size,
+                                                    true_batch_size) for hidden in self.prev_hidden])
+        lstm_out, lstm_hidden = self.lstm(hidden1, self.prev_hidden)
+        self.prev_hidden = lstm_hidden
+        lstm_out = lstm_out.squeeze(0)
+        return self.fc2(lstm_out)
 
-        return value, policy_dist
+    def reset_hidden(self, batch_size=1):
+        self.prev_hidden = init_hidden(self.num_lstm_layers, self.hidden_size // 4, self.device, batch_size)
+

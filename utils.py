@@ -393,7 +393,7 @@ class EnvWrapper:
         return action, log_prob, entropy
 
     @staticmethod
-    def on_policy(q_vals, eps=0, is_eval=False):
+    def on_policy(q_vals, eps=0, is_eval=False, eps_bounded=False):
         """
         Returns on policy (epsilon soft or greedy) action for a DQN net
         Returns epsilon soft by default. If eps is specified will return epsilon greedy
@@ -404,12 +404,18 @@ class EnvWrapper:
         if is_eval:
             # in evaluation take the best action you can do..
             action_idx = torch.argmax(q_vals, axis=-1).view(q_vals.shape[0], -1).to(q_vals.device)
-        elif eps: # epsilon greedy option
+        elif eps_bounded:  # combination of soft and greedy
+            if np.random.rand() <= eps:  # this is the greedy policy
+                action_idx = torch.randint(0, q_vals.shape[-1], (q_vals.shape[0], 1)).to(q_vals.device)
+            else:  # this is the soft policy
+                activated = F.softmax(q_vals, dim=1)
+                action_idx = torch.multinomial(activated, 1)
+        elif eps:  # epsilon greedy option
             if np.random.rand() <= eps:
                 action_idx = torch.randint(0, q_vals.shape[-1], (q_vals.shape[0], 1)).to(q_vals.device)
             else:
                 action_idx = torch.argmax(q_vals, axis=-1).view(q_vals.shape[0], -1).to(q_vals.device)
-        else: # epsilon soft option
+        else:  # epsilon soft option
             activated = F.softmax(q_vals, dim=1)
             action_idx = torch.multinomial(activated, 1)
         action = action_idx.item()
