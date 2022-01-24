@@ -134,7 +134,7 @@ class ConvDQN(nn.Module):
         super(ConvDQN, self).__init__()
         y_dim = obs_shape[0][0]
         x_dim = obs_shape[0][1]
-        self.conv = CNN(y_dim, x_dim, num_actions, hidden_size, device, kernels, channels, strides, pools)
+        self.cnn = CNN(y_dim, x_dim, num_actions, hidden_size, device, kernels, channels, strides, pools)
         self.fc = nn.Linear(hidden_size, num_actions)
         self.device = device
         self.num_actions = num_actions
