@@ -38,7 +38,7 @@ def main(raw_args):
     parser.add_argument('-action_type', type=str, nargs='?',
                         help='Type of action to use - wither ACT_WAIT, FREE, NO_WAIT', default='ACT_WAIT')
     parser.add_argument('-epochs', type=int, nargs='?', help='Num epochs (episodes) to train', default=5000)
-    parser.add_argument('-time_penalty', type=float, nargs='?', help='penalty for each turn', default=0.005)
+    parser.add_argument('-time_penalty', type=float, nargs='?', help='penalty for each turn', default=0.0)
     parser.add_argument('-trajectory_len', type=int, nargs='?', help='Maximal length of single trajectory', default=100)  # this used to be 5000
     parser.add_argument('-lr', type=float, nargs='?', help='Learning rate', default=5e-3)
     parser.add_argument('-discount_gamma', type=float, nargs='?', help='Discount factor', default=0.99)
