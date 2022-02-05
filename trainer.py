@@ -10,6 +10,7 @@ import torch
 from utils import Discretizer
 from a2c_agent import A2CAgent # Don't remove this
 from dqn_agent import DQNAgent # Don't remove this
+from ddqn_agent import DDQNAgent # Don't remove this
 
 
 def main(raw_args):
@@ -44,13 +45,16 @@ def main(raw_args):
     parser.add_argument('-discount_gamma', type=float, nargs='?', help='Discount factor', default=0.99)
     parser.add_argument('-scheduler_gamma', type=float, nargs='?', help='Scheduling factor', default=0.95)
     parser.add_argument('-scheduler_interval', type=int, nargs='?', help='Interval to step scheduler', default=1000)
+    parser.add_argument('-frames_to_skip', type=int, nargs='?', help='Frames to skip between agent interactions'
+                                                                     '1 is the default for ACT_WAIT action type',
+                        default=1)
     parser.add_argument('-beta', type=float, nargs='?', help='Info loss factor', default=1e-3)
     parser.add_argument('-epsilon', type=float, nargs='?', help='Epsilon for epsilon greedy policy for DQN only.'
                                                             ' Default is 0 and then epsilon-soft is used', default=0)
     parser.add_argument('-epsilon_decay', type=float, nargs='?', help='Epsilon decay for epsilon greedy policy (DQN only). '
                                                                   'Default is 0.997', default=0.997)
     parser.add_argument('-epsilon_min', type=float, nargs='?', help='Minimal epsilon for esp-greedy dqn. '
-                                                                    'Default is 0.01', default=0.01)
+                                                                    'Default is 0.1', default=0.1)
     parser.add_argument('-epsilon_bounded', action='store_true', help='Flag. If stated uses epsilon soft and greedy '
                                                                       'together such that a completly random policy is '
                                                                       'executed in a probability that equals the '
@@ -91,7 +95,8 @@ def main(raw_args):
     assert ~args.no_PER^('lstm' in args.model.lower())  # can't have PER and LSTM together
 
     envs = [utils.EnvWrapper(args.env, utils.ObsType[args.obs_type], utils.ActionType[args.action_type],
-            args.max_len, num_discrete=args.num_discrete, debug=args.debug, time_penalty=args.time_penalty)
+            args.max_len, num_discrete=args.num_discrete, debug=args.debug, time_penalty=args.time_penalty,
+                             frames_to_skip=args.frames_to_skip)
             for _ in range(args.num_envs)]
     env_gen = utils.AsyncEnvGen(envs, args.async_sleep_interval)
     obs_shape = envs[0].obs_shape

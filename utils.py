@@ -7,6 +7,7 @@ import numpy as np
 import sys
 import pickle
 # import gym_sokoban # Don't remove this
+from copy import deepcopy
 import gym
 import retro
 import random
@@ -68,7 +69,8 @@ class PERDataLoader(torch.utils.data.DataLoader):
     def __getitem__(self, idx):
         # returns state, action_idx, reward, new_state, done
         exp = self.exp[idx]
-        return exp[0], exp[1], exp[2], exp[3], exp[4]
+        # return exp[0], exp[1], exp[2], exp[3], exp[4]
+        return tuple(exp)
 
     def __len__(self):
         return len(self.exp)
@@ -195,6 +197,13 @@ def evaluate(agent, num_episodes=1, render=True):
     return all_rewards, all_episode_rewards, completed_levels
 
 
+def clone_model(model):
+    """
+    Clones a model
+    """
+    return deepcopy(model)
+
+
 class EnvWrapper:
     """
     Wrapps a Sokoban gym environment s.t. we can use the room_state property instead of regular state
@@ -232,6 +241,7 @@ class EnvWrapper:
         self.kill_hp_ratio = kill_hp_ratio
         self.debug = debug
         self.time_penalty = time_penalty
+        self.frames_to_skip = kwargs.get('frames_to_skip', 1)
         obs_shape = self.env.observation_space.shape
         if self.obs_type != ObsType.GYM:
             compressed_y_shape = (int(np.ceil(obs_shape[0] / self.compression_rate)))
@@ -272,14 +282,13 @@ class EnvWrapper:
 
     def step(self, action, is_eval=False):
         if self.action_type == ActionType.ACT_WAIT:
-            obs, reward1, done1, info = self.env.step(self.discretisizer.action(action))
-            if not done1:
-                obs, reward2, done2, info = self.env.step(self.discretisizer.action(MoveType.NONE.value))
-            else:
-                done2 = True
-                reward2 = 0
-            reward = reward1 + reward2
-            done = done1 | done2
+            obs, reward, done, info = self.env.step(self.discretisizer.action(action))
+            for i in range(self.frames_to_skip):
+                if not done:
+                    obs, reward_, done, info = self.env.step(self.discretisizer.action(MoveType.NONE.value))
+                    reward += reward_
+                else:
+                    break
         elif self.action_type == ActionType.GYM:
             obs, reward, done, info = self.env.step(action)
         else:
