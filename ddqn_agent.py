@@ -56,6 +56,7 @@ class DDQNAgent:
         :return:
         """
         self.model.to(device)
+        self.target_model.to(device)
         self.model.device = device
         self.model.train()
         self.target_model.eval()
@@ -67,7 +68,7 @@ class DDQNAgent:
         with torch.no_grad():
             while frames < REPLAY_INIT_LEN:
                 frames += 1
-                q_vals = self.target_model.forward(state.to(device))
+                q_vals = self.target_model.forward(state)
                 action, action_idx = self.env.on_policy(q_vals, epsilon, eps_bounded=epsilon_bounded)
                 new_state, reward, done, info = self.env.step(action)
                 self.replay_buffer.append((state, action_idx, reward, new_state))
