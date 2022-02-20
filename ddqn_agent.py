@@ -11,9 +11,12 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.nn.modules.rnn import LSTM
 
-REPLAY_INIT_LEN = 50000
-REPLAY_MAX_LEN = 1000000
-EPS_STEP = 0.9 / 1e6
+# REPLAY_INIT_LEN = 100 # 50000
+# REPLAY_MAX_LEN = 500
+# EPS_STEP = 0.9 / 1e6
+# EPS_STEP = 0.0005
+# UPDATE_TARGET_INTERVAL = 100
+# BACKPROP_INTERVAL =  32
 
 class DDQNAgent:
     """
@@ -23,7 +26,7 @@ class DDQNAgent:
     Can train or perform actions
     """
 
-    def __init__(self, model, save_path, log_path, **kwargs):
+    def __init__(self, model, save_path, log_path, replay_max_len=int(1e6), **kwargs):
         self.model = model
         self.target_model = utils.clone_model(self.model)
         self.env = gym.Env
@@ -35,15 +38,16 @@ class DDQNAgent:
         self.all_rewards = []
         self.all_times = []
         self.log_buffer = []
+        self.episode_rewards = []
         self.is_lstm = any([isinstance(module, LSTM) for module in model.modules()])
-        self.replay_buffer = []
+        self.replay_buffer = utils.PERDataSet(max_len=replay_max_len)
 
     def train(self, epochs: int, trajectory_len: int, env_gen: utils.AsyncEnvGen, lr=1e-4,
               discount_gamma=0.99, scheduler_gamma=0.98, beta=1e-3, print_interval=1000, log_interval=1000,
               save_interval=10000, scheduler_interval=1000, no_per=False, epsilon=0,
               epsilon_decay=0.997, eval_interval=0, stop_trick_at=0, batch_size=32, epsilon_min=0.01,
-              epsilon_bounded=False, device=torch.device('cpu'), update_target_interval=4, backprop_interval=4,
-              **kwargs):
+              epsilon_bounded=False, device=torch.device('cpu'), update_target_interval=10000,
+              backprop_interval=32, replay_init_len=50000, final_exp_time = int(1e6), clip_loss=False, **kwargs):
         """
         Trains the model
         :param epochs: int, number of epochs to run
@@ -58,20 +62,19 @@ class DDQNAgent:
         self.model.to(device)
         self.target_model.to(device)
         self.model.device = device
-        self.model.train()
+        self.model.eval()
         self.target_model.eval()
+        # self.target_model.eval()
+        eps_step = (epsilon - epsilon_min) / final_exp_time
 
         # Init replay buffer with 50K random examples
         print('Initializing replay buffer')
         state, self.env = env_gen.get_reset_env()
         frames = 0
         with torch.no_grad():
-            while frames < REPLAY_INIT_LEN:
+            while frames < replay_init_len:
                 frames += 1
-                q_vals = self.target_model.forward(state)
-                action, action_idx = self.env.on_policy(q_vals, epsilon, eps_bounded=epsilon_bounded)
-                new_state, reward, done, info = self.env.step(action)
-                self.replay_buffer.append((state, action_idx, reward, new_state))
+                done, state = self.train_step(state, epsilon, epsilon_bounded, discount_gamma)
                 if done:
                     state, self.env = env_gen.get_reset_env()
         print('Replay buffer initialized')
@@ -82,74 +85,71 @@ class DDQNAgent:
 
         for episode in range(epochs):
             ep_start_time = time.time()
-            episode_rewards = []
+            self.episode_rewards = []
             state, self.env = env_gen.get_reset_env()
 
             for step in range(self.env.max_steps):
                 steps_count += 1
-                with torch.no_grad():
-                    q_vals = self.model.forward(state)
-                    action, action_idx = self.env.on_policy(q_vals, epsilon, eps_bounded=epsilon_bounded)
-                    new_state, reward, done, info = self.env.step(action)
-                    # TODO: use get_delta() to compute PER later
-                self.replay_buffer.append((state, action_idx, reward, new_state))
-                self.replay_buffer = self.replay_buffer[-REPLAY_MAX_LEN:]
-
-                if not (steps_count % backprop_interval) or done:
-                    dataset = utils.PERDataLoader(self.replay_buffer, use_per=False)  # (not no_per))  # TODO: add PER logic for DDQN
-                    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-                    for states, action_idxs, rewards, new_states in dataloader:
-                        with torch.no_grad():
-                            new_qs = self.target_model(new_states)
-                        off_policy = self.env.off_policy(new_qs)
-                        # off_policy *= (1 - dones.int().to(device))  # Q=0 where action leads to end of episode
-                        targets = (rewards.to(device) + discount_gamma * off_policy).view(-1, 1)
-                        predictions = self.model(states)
-                        targets_full = predictions.detach().clone()
-                        targets_full.scatter_(-1, action_idxs.squeeze(-1).to(device), targets.float())
-                        optimizer.zero_grad()
-                        loss = F.mse_loss(predictions, targets_full.float())
+                done, state = self.train_step(state, epsilon, epsilon_bounded, discount_gamma)
+                if epsilon > epsilon_min:
+                    epsilon -= eps_step
+                # if not (steps_count % update_target_interval):
+                #     self.target_model.load_state_dict(self.model.state_dict())
+                if done or (not step % batch_size):
+                    if not no_per:
+                        self.replay_buffer.per()
+                    states, action_idxs, rewards, new_states, dones = self.replay_buffer.sample(batch_size)
+                    with torch.no_grad():
+                        new_qs = self.target_model(new_states)
+                    off_policy = self.env.off_policy(new_qs).to(device)
+                    targets = (rewards.to(device) + discount_gamma * off_policy * (1 - dones.int().to(device))).view(-1, 1)
+                    predictions = self.model(states).to(device)
+                    predictions = torch.gather(predictions, -1, action_idxs.squeeze(-1).to(device))
+                    self.model.train()
+                    optimizer.zero_grad()
+                    loss = F.mse_loss(predictions, targets.float())
+                    if clip_loss:  # This doesn't work well
                         loss = torch.clip(loss, -1, 1)
-                        loss.backward()
-                        optimizer.step()
-
-                if not (steps_count % update_target_interval) and steps_count != 0:
-                    self.target_model.load_state_dict(self.model.state_dict())
-
+                    loss.backward()
+                    optimizer.step()
+                    self.model.eval()
                 if done:
-                    self.all_times.append(time.time() - ep_start_time)
-                    self.all_rewards.append(np.sum(episode_rewards))
-                    self.all_lengths.append(step)
-                    if np.mean(self.all_rewards[-100:]) >= 200:
-                        sys.stdout.write('{0} episode {1}, Last 100 train episodes averaged 200 points {0}\n'
-                                         .format('*' * 10, episode))
-                        utils.save_agent(self)
-                        return
-                    if epsilon > epsilon_min:
-                        epsilon -= EPS_STEP
-                    if np.mean(self.all_rewards[-100:]) >= 200:
-                        print('='*10, 'episode {}, Last 100 episodes averaged 200 points '.format(episode), '='*10)
-                        return
-                    if (episode % print_interval == 0) and episode != 0:
-                        utils.print_stats(self, episode, print_interval, steps_count)
-                        steps_count = 0
-                    if (episode % scheduler_interval == 0) and (episode != 0):
-                        scheduler.step()
-                        sys.stdout.write('stepped scheduler, new lr: {:.5f}\n'.format(scheduler.get_last_lr()[0]))
-                    if (episode % save_interval == 0) and (episode != 0):
-                        utils.save_agent(self)
-                    if log_interval and (episode % log_interval == 0) and (episode != 0):
-                        utils.log(self)
-                    if eval_interval:
-                        if ((episode % eval_interval)  == 0 ) and (episode != 0):
-                            _, all_episode_rewards, completed_sokoban_levels = utils.evaluate(self, 100, render=False)
-                            utils.print_eval(all_episode_rewards, completed_sokoban_levels)
-                            if np.mean(all_episode_rewards) >= 200:
-                                sys.stdout.write('{0} episode {1}, Last 100 eval episodes averaged 200 points {0}\n'
-                                                 .format('*' * 10, episode))
-                                utils.save_agent(self)
-                                return
                     break
+
+            if not (episode % update_target_interval) and (episode != 0):
+                self.target_model.load_state_dict(self.model.state_dict())
+
+            if done:
+                self.all_times.append(time.time() - ep_start_time)
+                self.all_rewards.append(np.sum(self.episode_rewards))
+                self.all_lengths.append(step)
+                if np.mean(self.all_rewards[-100:]) >= 200:
+                    sys.stdout.write('{0} episode {1}, Last 100 train episodes averaged 200 points {0}\n'
+                                     .format('*' * 10, episode))
+                    utils.save_agent(self)
+                    return
+                if np.mean(self.all_rewards[-100:]) >= 200:
+                    print('='*10, 'episode {}, Last 100 episodes averaged 200 points '.format(episode), '='*10)
+                    return
+                if (episode % print_interval == 0) and episode != 0:
+                    utils.print_stats(self, episode, print_interval, steps_count)
+                    steps_count = 0
+                if (episode % scheduler_interval == 0) and (episode != 0):
+                    scheduler.step()
+                    sys.stdout.write('stepped scheduler, new lr: {:.5f}\n'.format(scheduler.get_last_lr()[0]))
+                if (episode % save_interval == 0) and (episode != 0):
+                    utils.save_agent(self)
+                if log_interval and (episode % log_interval == 0) and (episode != 0):
+                    utils.log(self)
+                if eval_interval:
+                    if ((episode % eval_interval)  == 0 ) and (episode != 0):
+                        _, all_episode_rewards, completed_sokoban_levels = utils.evaluate(self, 100, render=False)
+                        utils.print_eval(all_episode_rewards, completed_sokoban_levels)
+                        if np.mean(all_episode_rewards) >= 200:
+                            sys.stdout.write('{0} episode {1}, Last 100 eval episodes averaged 200 points {0}\n'
+                                             .format('*' * 10, episode))
+                            utils.save_agent(self)
+                            return
 
         sys.stdout.write('-' * 10 + ' Finished training ' + '-' * 10 + '\n')
         utils.kill_process(env_gen)
@@ -185,3 +185,25 @@ class DDQNAgent:
         else:
             raise NotImplementedError
         return zeros
+
+    def train_step(self, state, epsilon, epsilon_bounded, discount_gamma):
+        """
+        Steps the agent one move
+        Notice that delta is computed with the target model that is updated on the fly
+        This means that there will be 'stale' delta values in the buffer, but this should balance out
+        As the buffer has a limited capacity and 'very stale' values will be washed out with time
+        These stale targets are to be used with PER only and not with the backprop itself
+        To enhance this wash-out (over randomness) lower the maximal buffer's length
+        """
+        with torch.no_grad():
+            q_vals = self.model.forward(state)
+            action, action_idx = self.env.on_policy(q_vals, epsilon, eps_bounded=epsilon_bounded)
+            new_state, reward, done, info = self.env.step(action)
+            new_q_vals = self.target_model.forward(new_state).detach()
+            new_q = self.env.off_policy(new_q_vals)
+            target = (reward + discount_gamma * new_q).view(1, -1, 1)
+            delta = self.get_delta(q_vals, action_idx, target)
+            self.replay_buffer.append((state, action_idx, reward, new_state, done, delta))
+            self.episode_rewards.append(reward)
+        return done, new_state
+

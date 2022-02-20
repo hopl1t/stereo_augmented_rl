@@ -13,6 +13,7 @@ import retro
 import random
 import os
 import torch.nn.functional as F
+from torch.utils.data import Dataset
 try:
     from gym.wrappers import Monitor
 except ModuleNotFoundError as e:
@@ -52,19 +53,44 @@ AUDIO_BUFFER_SIZE = 524
 SPECTOGRAM_SIZE = 64
 
 
-class PERDataLoader(torch.utils.data.DataLoader):
-    def __init__(self, experience, use_per, low_ratio=6):
-        super(PERDataLoader, self).__init__(experience)
-        self.use_per = True
-        self.low_ratio = low_ratio
-        if use_per:
-            sorted_exp = sorted(experience, key=lambda tup: tup[-1])
-            high_delta = sorted_exp[-len(experience) // 2:]
-            low_delta = sorted_exp[:len(experience) // 2]
-            per = high_delta + random.choices(low_delta, k=len(experience) // low_ratio)
-            self.exp = per
-        else:
-            self.exp = experience
+class PERDataSet(Dataset):
+    def __init__(self, max_len=100000, min_len=500):
+        super(PERDataSet, self).__init__()
+        self.exp = []
+        self.max_len = max_len
+        self.min_len = min_len
+
+    def append(self, experience):
+        self.exp.append(experience)
+        self.exp = self.exp[-self.max_len:] ## CHECK IF THIS IS MEFASTEN
+
+    def per(self, low_ratio=6):
+        """
+        Removes experiences with low distance between expected and actual q-values ('delta')
+        """
+        if len(self) >= self.min_len:
+            self.exp = sorted(self.exp, key=lambda tup: tup[-1])
+            high_delta = self.exp[-len(self.exp) // 2:]
+            low_delta = self.exp[:len(self.exp) // 2]
+            self.exp = high_delta + random.choices(low_delta, k=len(self.exp) // low_ratio)
+
+    def sample(self, batch_size):
+        samples =  random.sample(self.exp, batch_size)
+        states_vid, states_aud, action_idxs, rewards, new_states_vid, new_states_aud, dones = [], [], [], [], [], [], []
+        for sample in samples:
+            states_vid.append(sample[0][0])
+            states_aud.append(sample[0][1])
+            action_idxs.append(sample[1])
+            rewards.append(sample[2])
+            new_states_vid.append(sample[3][0])
+            new_states_aud.append(sample[3][1])
+            dones.append(sample[4])
+        states = [torch.tensor(states_vid), torch.tensor(states_aud)]
+        new_states = [torch.tensor(new_states_vid), torch.tensor(new_states_aud)]
+        action_idxs = torch.tensor(action_idxs).unsqueeze(-1).unsqueeze(-1)
+        rewards = torch.tensor(rewards)
+        dones = torch.tensor(dones)
+        return states, action_idxs, rewards, new_states, dones
 
     def __getitem__(self, idx):
         # returns state, action_idx, reward, new_state, done

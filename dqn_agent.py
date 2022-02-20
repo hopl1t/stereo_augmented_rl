@@ -86,7 +86,9 @@ class DQNAgent:
                     self.log_buffer.append(info.__repr__() + '\n')
 
                 if done or ((step % trajectory_len == 0) and step != 0):
-                    dataset = utils.PERDataLoader(experience, use_per=(not no_per))
+                    dataset = utils.PERDataSet(experience, use_per=(not no_per))
+                    if not no_per:
+                        dataset.per()
                     if self.is_lstm:
                         # No shuffeling for LSTM!
                         dataloader = DataLoader(dataset, batch_size=min(len(dataset), batch_size), shuffle=False)

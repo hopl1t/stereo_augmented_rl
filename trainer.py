@@ -80,7 +80,7 @@ def main(raw_args):
                         default=1e-2)
     parser.add_argument('-num_envs', type=int, nargs='?', help='Number of async envs to use if using async_env.'
                                                                ' default 2', default=2)
-    parser.add_argument('-no_cuda', action='store_true', help='Flag. If specified do not use cuda',default=False)
+    parser.add_argument('-no_cuda', action='store_true', help='Flag. If specified do not use cuda', default=False)
     parser.add_argument(
         '-no_PER', action='store_true', help='Flag. If specified disables the use of PER in DQN agents', default=False)
     parser.add_argument('-debug', action='store_true', help='Flag. If specified prints debug data', default=False)
@@ -89,6 +89,16 @@ def main(raw_args):
                                                     'prevent exploding gradient', default=False)
     parser.add_argument('-num_discrete', type=int, nargs='?', help='How many discrete actions to generate for a cont.'
                                                                    ' setting using discrete action space', default=10)
+    parser.add_argument('-replay_init_len', type=int, nargs='?', help='Initialization size of replay buffer for ddqn',
+                        default=50000)
+    parser.add_argument('-replay_max_len', type=int, nargs='?', help='Max size of replay buffer for ddqn',
+                        default=int(1e6))
+    parser.add_argument('-update_target_interval', type=int, nargs='?', help='How often to update target network',
+                        default=10000)
+    parser.add_argument('-backprop_interval', type=int, nargs='?', help='How often to backprop', default=1)
+    parser.add_argument('-final_exp_time', type=int, nargs='?', help='Number of frames until eps is minimal',
+                        default=int(1e6))
+    parser.add_argument('-clip_loss', action='store_true', help='Flag. How often to backprop', default=False)
     args = parser.parse_args(raw_args)
     assert os.path.isdir(args.save_dir)
     assert os.path.isdir(args.log_dir)
@@ -128,7 +138,8 @@ def main(raw_args):
         timestamp = datetime.now().strftime('%y%m%d%H%m')
         save_path = os.path.join(args.save_dir, '{0}_{1}_{2}.pkl'.format(args.model, args.env, timestamp))
         log_path = os.path.join(args.log_dir, '{0}_{1}_{2}.log'.format(args.model, args.env, timestamp))
-        agent = getattr(sys.modules[__name__], args.agent)(model, save_path, log_path)
+        agent = getattr(sys.modules[__name__], args.agent)(model, save_path, log_path,
+                                                           replay_max_len=args.replay_max_len)
 
     try:
         if args.async_env:
@@ -140,7 +151,9 @@ def main(raw_args):
                     clip_gradient=args.clip_gradient, no_per=args.no_PER, no_cuda=args.no_cuda,
                     save_interval=args.save_interval, epsilon=args.epsilon, epsilon_decay=args.epsilon_decay,
                     eval_interval=args.eval_interval, batch_size=args.batch_size, epsilon_min=args.epsilon_min,
-                    epsilon_bounded=args.epsilon_bounded, device=device)
+                    epsilon_bounded=args.epsilon_bounded, device=device, replay_init_len=args.replay_init_len,
+                     update_target_interval=args.update_target_interval, backprop_interval=args.backprop_interval,
+                    final_exp_time=args.final_exp_time, clip_loss=args.clip_loss)
     except Exception as e:
         raise e
     finally:
