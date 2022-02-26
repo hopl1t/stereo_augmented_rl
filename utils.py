@@ -86,9 +86,8 @@ class PERDataSet(Dataset):
             new_states_vid.append(sample[3][0])
             new_states_aud.append(sample[3][1])
             dones.append(sample[4])
-        # TODO: UserWarning: Creating a tensor from a list of numpy.ndarrays is extremely slow. Please consider converting the list to a single numpy.ndarray with numpy.array() before converting to a tensor
-        states = [torch.tensor(states_vid), torch.tensor(states_aud)]
-        new_states = [torch.tensor(new_states_vid), torch.tensor(new_states_aud)]
+        states = [torch.tensor(np.array(states_vid)), torch.tensor(np.array(states_aud))]
+        new_states = [torch.tensor(np.array(new_states_vid)), torch.tensor(np.array(new_states_aud))]
         action_idxs = torch.tensor(action_idxs).unsqueeze(-1).unsqueeze(-1)
         rewards = torch.tensor(rewards)
         dones = torch.tensor(dones)
