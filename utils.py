@@ -340,7 +340,7 @@ class EnvWrapper:
             if health_delta < 0:
                 # This is a bug in the game
                 if self.debug:
-                    print('health_delta < 0, info: {}\nskipping...'.format(info))
+                    sys.stdout.write('health_delta < 0, info: {}\nskipping...'.format(info))
                     reward = 0
                     done = True
             else:
@@ -350,7 +350,7 @@ class EnvWrapper:
             if health < 10:
                 done = True
             if self.debug:
-                print('health: {}\tscore: {}\treward: {}\taction: {}'.format(health, score, reward, action))
+                sys.stdout.write('health: {}\tscore: {}\treward: {}\taction: {}'.format(health, score, reward, action))
         return obs, reward, done, info
 
     @staticmethod

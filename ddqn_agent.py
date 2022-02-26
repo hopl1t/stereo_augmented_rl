@@ -47,7 +47,8 @@ class DDQNAgent:
               save_interval=10000, scheduler_interval=1000, no_per=False, epsilon=0,
               epsilon_decay=0.997, eval_interval=0, stop_trick_at=0, batch_size=32, epsilon_min=0.01,
               epsilon_bounded=False, device=torch.device('cpu'), update_target_interval=10000,
-              backprop_interval=32, replay_init_len=50000, final_exp_time = int(1e6), clip_loss=False, **kwargs):
+              backprop_interval=32, replay_init_len=50000, final_exp_time = int(1e6), clip_loss=False,
+              no_cuda=False, **kwargs):
         """
         Trains the model
         :param epochs: int, number of epochs to run
@@ -67,8 +68,13 @@ class DDQNAgent:
         # self.target_model.eval()
         eps_step = (epsilon - epsilon_min) / final_exp_time
 
+        if torch.cuda.is_available() and not no_cuda:
+            sys.stdout.write('Using CUDA {}\n'.format(device))
+        else:
+            sys.stdout.write('Using CPU\n')
+
         # Init replay buffer with 50K random examples
-        print('Initializing replay buffer')
+        sys.stdout.write('Initializing replay buffer')
         state, self.env = env_gen.get_reset_env()
         frames = 0
         with torch.no_grad():
@@ -77,7 +83,7 @@ class DDQNAgent:
                 done, state = self.train_step(state, epsilon, epsilon_bounded, discount_gamma)
                 if done:
                     state, self.env = env_gen.get_reset_env()
-        print('Replay buffer initialized')
+        sys.stdout.write('Replay buffer initialized')
 
         optimizer = optim.Adam(self.model.parameters(), lr=lr)
         scheduler = lr_scheduler.ExponentialLR(optimizer, gamma=scheduler_gamma)
@@ -130,7 +136,7 @@ class DDQNAgent:
                     utils.save_agent(self)
                     return
                 if np.mean(self.all_rewards[-100:]) >= 200:
-                    print('='*10, 'episode {}, Last 100 episodes averaged 200 points '.format(episode), '='*10)
+                    sys.stdout.write('='*10, 'episode {}, Last 100 episodes averaged 200 points '.format(episode), '='*10)
                     return
                 if (episode % print_interval == 0) and episode != 0:
                     utils.print_stats(self, episode, print_interval, steps_count)
