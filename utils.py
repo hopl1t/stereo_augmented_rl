@@ -350,7 +350,7 @@ class EnvWrapper:
             if health < 10:
                 done = True
             if self.debug:
-                sys.stdout.write('health: {}\tscore: {}\treward: {}\taction: {}'.format(health, score, reward, action))
+                sys.stdout.write('health: {}\tscore: {}\treward: {}\taction: {}\n'.format(health, score, reward, action))
         return obs, reward, done, info
 
     @staticmethod
