@@ -95,7 +95,7 @@ class DDQNAgent:
                     epsilon -= eps_step
                 # if not (steps_count % update_target_interval):
                 #     self.target_model.load_state_dict(self.model.state_dict())
-                if done or (not step % batch_size):
+                if done or ((not steps_count % backprop_interval) and steps_count != 0):
                     if not no_per:
                         self.replay_buffer.per()
                     states, action_idxs, rewards, new_states, dones = self.replay_buffer.sample(batch_size)
@@ -113,11 +113,12 @@ class DDQNAgent:
                     loss.backward()
                     optimizer.step()
                     self.model.eval()
+
+                if not (steps_count % update_target_interval) and (steps_count != 0):
+                    self.target_model.load_state_dict(self.model.state_dict())
+
                 if done:
                     break
-
-            if not (episode % update_target_interval) and (episode != 0):
-                self.target_model.load_state_dict(self.model.state_dict())
 
             if done:
                 self.all_times.append(time.time() - ep_start_time)

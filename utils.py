@@ -19,6 +19,7 @@ try:
 except ModuleNotFoundError as e:
     sys.stdout.write('Cannot import Monitor module, rendering won\'t be possible: {}\nContinuing..\n'.format(e))
 
+OBS_BUFFER_LEN = 4
 
 class ObsType(Enum):
     GYM = auto()
@@ -85,6 +86,7 @@ class PERDataSet(Dataset):
             new_states_vid.append(sample[3][0])
             new_states_aud.append(sample[3][1])
             dones.append(sample[4])
+        # TODO: UserWarning: Creating a tensor from a list of numpy.ndarrays is extremely slow. Please consider converting the list to a single numpy.ndarray with numpy.array() before converting to a tensor
         states = [torch.tensor(states_vid), torch.tensor(states_aud)]
         new_states = [torch.tensor(new_states_vid), torch.tensor(new_states_aud)]
         action_idxs = torch.tensor(action_idxs).unsqueeze(-1).unsqueeze(-1)
@@ -237,7 +239,7 @@ class EnvWrapper:
 
     def __init__(self, env_name, obs_type=ObsType.VIDEO_ONLY, action_type=ActionType.ACT_WAIT,
                  max_steps=5000, compression_rate=4, kill_hp_ratio=0.05, debug=False,
-                 time_penalty=0.005, **kwargs):
+                 time_penalty=0.005, use_history=False, **kwargs):
         """
         Wraps a gym environment s.t. you can control it's input and output
         :param env_name: str, The environments name
@@ -268,6 +270,8 @@ class EnvWrapper:
         self.debug = debug
         self.time_penalty = time_penalty
         self.frames_to_skip = kwargs.get('frames_to_skip', 1)
+        self.use_history = use_history
+        self.obs_buffer = []
         obs_shape = self.env.observation_space.shape
         if self.obs_type != ObsType.GYM:
             compressed_y_shape = (int(np.ceil(obs_shape[0] / self.compression_rate)))
@@ -289,6 +293,9 @@ class EnvWrapper:
             self.obs_shape = ((compressed_y_shape, compressed_x_shape), 4)  # frequency left + max vol, frequency right + max vol
         elif obs_type == ObsType.GYM:
             self.obs_shape = ((obs_shape[0], 1), 1)
+
+        if use_history:
+            self.obs_shape = ((self.obs_shape[0][0]*OBS_BUFFER_LEN, self.obs_shape[0][1]), self.obs_shape[1])
 
         if action_type == ActionType.ACT_WAIT:
             self.num_actions = len(MoveType)
@@ -414,6 +421,19 @@ class EnvWrapper:
             obs = (obs, np.zeros(SPECTOGRAM_SIZE))
         elif self.obs_type == ObsType.VNC_FOURIER_STEREO:
             raise NotImplementedError
+
+        if self.use_history:  # using OBS_BUFFER_LEN last observations as input as per https://web.stanford.edu/class/psych209/Readings/MnihEtAlHassibis15NatureControlDeepRL.pdf
+            if len(self.obs_buffer) == 0:  # first run (after reset)
+                for i in range(OBS_BUFFER_LEN):
+                    self.obs_buffer.append(obs)
+            else:
+                self.obs_buffer.append(obs)
+                self.obs_buffer = self.obs_buffer[1:]
+            if len(self.obs_buffer) > OBS_BUFFER_LEN:  # this is just a sanity check
+                raise BufferError('obs buffer is too long')
+            vid_obs = np.concatenate([tup[0] for tup in self.obs_buffer], axis=0)
+            aud_obs = np.concatenate([tup[1] for tup in self.obs_buffer], axis=0)
+            obs = (vid_obs, aud_obs)
 
         return obs
 

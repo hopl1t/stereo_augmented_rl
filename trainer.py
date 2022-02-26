@@ -99,6 +99,8 @@ def main(raw_args):
     parser.add_argument('-final_exp_time', type=int, nargs='?', help='Number of frames until eps is minimal',
                         default=int(1e6))
     parser.add_argument('-clip_loss', action='store_true', help='Flag. How often to backprop', default=False)
+    parser.add_argument('-use_history', action='store_true', help='Flag. Use last 4 observations as input',
+                        default=False)
     args = parser.parse_args(raw_args)
     assert os.path.isdir(args.save_dir)
     assert os.path.isdir(args.log_dir)
@@ -106,7 +108,7 @@ def main(raw_args):
 
     envs = [utils.EnvWrapper(args.env, utils.ObsType[args.obs_type], utils.ActionType[args.action_type],
             args.max_len, num_discrete=args.num_discrete, debug=args.debug, time_penalty=args.time_penalty,
-                             frames_to_skip=args.frames_to_skip)
+                             frames_to_skip=args.frames_to_skip, use_history=args.use_history)
             for _ in range(args.num_envs)]
     env_gen = utils.AsyncEnvGen(envs, args.async_sleep_interval)
     obs_shape = envs[0].obs_shape
