@@ -77,6 +77,14 @@ for lr in lrs:
                                             print_interval=PRINT_INTERVAL, log_interval=LOG_INTERVAL, scheduler_interval=SCHED_INTERVAL,
                                             no_per=no_per, epsilon=epsilon, batch_size=32, epsilon_min=0.1, device=device, replay_init_len=REPLAY_INIT_LEN,
                                             update_target_interval=update_interval, backprop_interval=backprop_interval, final_exp_time=FINAL_EXP_TIME)
+                                except KeyboardInterrupt as e:
+                                    sys.stdout.write('skip (s) or quit (q)?')
+                                    sys.stdout.flush()
+                                    answer = input()
+                                    if answer == 's':
+                                        continue
+                                    else:
+                                        raise e
                                 except Exception as e:
                                     raise e
                                 finally:
