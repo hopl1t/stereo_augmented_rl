@@ -49,6 +49,7 @@ class A2CAgent:
         else:
             device = torch.device('cpu')
             sys.stdout.write('Using CPU\n')
+        sys.stdout.flush()
         self.model.to(device)
         self.model.device = device
         self.model.train()
@@ -124,6 +125,7 @@ class A2CAgent:
                         if (episode % scheduler_interval == 0) and (episode != 0):
                             scheduler.step()
                             sys.stdout.write('stepped scheduler, new lr: {:.5f}\n'.format(scheduler.get_last_lr()[0]))
+                            sys.stdout.flush()
                         if (episode % save_interval == 0) and (episode != 0):
                             utils.save_agent(self)
                         if log_interval and (episode % log_interval == 0) and (episode != 0):
@@ -131,6 +133,7 @@ class A2CAgent:
                         break
 
         sys.stdout.write('-' * 10 + ' Finished training ' + '-' * 10 + '\n')
+        sys.stdout.flush()
         utils.kill_process(env_gen)
         sys.stdout.write('Killed env gen process\n')
         utils.save_agent(self)

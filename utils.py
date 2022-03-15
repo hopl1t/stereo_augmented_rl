@@ -18,6 +18,7 @@ try:
     from gym.wrappers import Monitor
 except ModuleNotFoundError as e:
     sys.stdout.write('Cannot import Monitor module, rendering won\'t be possible: {}\nContinuing..\n'.format(e))
+    sys.stdout.flush()
 
 OBS_BUFFER_LEN = 4
 
@@ -54,7 +55,8 @@ AUDIO_BUFFER_SIZE = 524
 SPECTOGRAM_SIZE = 64
 
 
-class PERDataSet(Dataset):
+# class PERDataSet(Dataset):
+class PERDataSet():
     def __init__(self, max_len=100000, min_len=500):
         super(PERDataSet, self).__init__()
         self.exp = []
@@ -170,6 +172,7 @@ def save_agent(agent):
         else:
             pickle.dump(agent, f)
     sys.stdout.write('Saved agent to {}\n'.format(agent.save_path))
+    sys.stdout.flush()
 
 
 def log(agent, what_to_log=None):
@@ -179,6 +182,7 @@ def log(agent, what_to_log=None):
         _ = f.writelines(what_to_log)
         agent.log_buffer = []
     sys.stdout.write('Logged info to {}\n'.format(agent.log_path))
+    sys.stdout.flush()
 
 
 def print_stats(agent, episode, print_interval, steps_count=0):
@@ -197,6 +201,7 @@ def print_eval(all_episode_rewards, completed_levels):
     sys.stdout.write('\nEvaluation on last 100 episodes:\tmean: {:.3f}\tmin: {:.3f}\t\tmax: {:.3f}\t\t'
                      '%completed levels (sokoban only): {:.3f}\n'.format(np.mean(all_episode_rewards),
                      np.min(all_episode_rewards), np.max(all_episode_rewards), completed_levels / 100))
+    sys.stdout.flush()
 
 
 def evaluate(agent, num_episodes=1, render=True):
@@ -207,6 +212,7 @@ def evaluate(agent, num_episodes=1, render=True):
     for epispode in range(num_episodes):
         if render:
             sys.stdout.write('Saving render video to {}\n'.format(os.path.join(os.getcwd(), 'video')))
+            sys.stdout.flush()
             agent.env.env = Monitor(agent.env.env, './video', force=True)
         episode_rewards = []
         obs = agent.env.reset()
@@ -343,6 +349,7 @@ class EnvWrapper:
                 # This is a bug in the game
                 if self.debug:
                     sys.stdout.write('health_delta < 0, info: {}\nskipping...'.format(info))
+                    sys.stdout.flush()
                     reward = 0
                     done = True
             else:
@@ -353,6 +360,7 @@ class EnvWrapper:
                 done = True
             if self.debug:
                 sys.stdout.write('health: {}\tscore: {}\treward: {}\taction: {}\n'.format(health, score, reward, action))
+                sys.stdout.flush()
         return obs, reward, done, info
 
     @staticmethod

@@ -76,6 +76,7 @@ class DDQNAgent:
 
         # Init replay buffer with 50K random examples
         sys.stdout.write('Initializing replay buffer\n')
+        sys.stdout.flush()
         state = self.env.reset()
         frames = 0
         with torch.no_grad():
@@ -85,6 +86,7 @@ class DDQNAgent:
                 if done:
                     state = self.env.reset()
         sys.stdout.write('Replay buffer initialized\n')
+        sys.stdout.flush()
 
         optimizer = optim.Adam(self.model.parameters(), lr=lr)
         scheduler = lr_scheduler.ExponentialLR(optimizer, gamma=scheduler_gamma)
@@ -158,8 +160,9 @@ class DDQNAgent:
                                              .format('*' * 10, episode))
                             utils.save_agent(self)
                             return
-
+                sys.stdout.flush()
         sys.stdout.write('-' * 10 + ' Finished training ' + '-' * 10 + '\n')
+        sys.stdout.flush()
         utils.save_agent(self)
         if log_interval:
             utils.log(self)

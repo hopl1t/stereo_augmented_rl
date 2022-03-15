@@ -118,7 +118,7 @@ def main(raw_args):
     else:
         device = torch.device('cpu')
         sys.stdout.write('Using CPU\n')
-
+    sys.stdout.flush()
     if args.load:
         with open(args.load, 'rb') as f:
             agent = pickle.load(f)

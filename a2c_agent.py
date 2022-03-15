@@ -114,6 +114,7 @@ class A2CAgent:
                         if np.mean(self.all_rewards[-100:]) >= 200:
                             sys.stdout.write('{0} episode {1}, Last 100 train episodes averaged 200 points {0}\n'
                                              .format('*' * 10, episode))
+                            sys.stdout.flush()
                             utils.save_agent(self)
                             return
                         if (episode % print_interval == 0) and episode != 0:
@@ -122,6 +123,7 @@ class A2CAgent:
                         if (episode % scheduler_interval == 0) and (episode != 0):
                             scheduler.step()
                             sys.stdout.write('stepped scheduler, new lr: {:.5f}\n'.format(scheduler.get_last_lr()[0]))
+                            sys.stdout.flush()
                         if (episode % save_interval == 0) and (episode != 0):
                             utils.save_agent(self)
                         if log_interval and (episode % log_interval == 0) and (episode != 0):
@@ -133,11 +135,13 @@ class A2CAgent:
                                 if np.mean(all_episode_rewards) >= 200:
                                     sys.stdout.write('{0} episode {1}, Last 100 eval episodes averaged 200 points {0}\n'
                                                      .format('*' * 10, episode))
+                                    sys.stdout.flush()
                                     utils.save_agent(self)
                                     return
                         break
 
         sys.stdout.write('-' * 10 + ' Finished training ' + '-' * 10 + '\n')
+        sys.stdout.flush()
         utils.save_agent(self)
         if log_interval:
             utils.log(self)
