@@ -42,7 +42,7 @@ class DDQNAgent:
         self.is_lstm = any([isinstance(module, LSTM) for module in model.modules()])
         self.replay_buffer = utils.PERDataSet(max_len=replay_max_len)
 
-    def train(self, epochs: int, trajectory_len: int, env_gen: utils.AsyncEnvGen, lr=1e-4,
+    def train(self, epochs: int, trajectory_len: int, env_wrapper: utils.EnvWrapper, lr=1e-4,
               discount_gamma=0.99, scheduler_gamma=0.98, beta=1e-3, print_interval=1000, log_interval=1000,
               save_interval=10000, scheduler_interval=1000, no_per=False, epsilon=0,
               epsilon_decay=0.997, eval_interval=0, stop_trick_at=0, batch_size=32, epsilon_min=0.01,
@@ -65,6 +65,7 @@ class DDQNAgent:
         self.model.device = device
         self.model.eval()
         self.target_model.eval()
+        self.env = env_wrapper
         # self.target_model.eval()
         eps_step = (epsilon - epsilon_min) / final_exp_time
 
@@ -75,14 +76,14 @@ class DDQNAgent:
 
         # Init replay buffer with 50K random examples
         sys.stdout.write('Initializing replay buffer\n')
-        state, self.env = env_gen.get_reset_env()
+        state = self.env.reset()
         frames = 0
         with torch.no_grad():
             while frames < replay_init_len:
                 frames += 1
                 done, state = self.train_step(state, epsilon, epsilon_bounded, discount_gamma)
                 if done:
-                    state, self.env = env_gen.get_reset_env()
+                    state = self.env.reset()
         sys.stdout.write('Replay buffer initialized\n')
 
         optimizer = optim.Adam(self.model.parameters(), lr=lr)
@@ -92,7 +93,7 @@ class DDQNAgent:
         for episode in range(epochs):
             ep_start_time = time.time()
             self.episode_rewards = []
-            state, self.env = env_gen.get_reset_env()
+            state = self.env.reset()
 
             for step in range(self.env.max_steps):
                 steps_count += 1
@@ -159,8 +160,6 @@ class DDQNAgent:
                             return
 
         sys.stdout.write('-' * 10 + ' Finished training ' + '-' * 10 + '\n')
-        utils.kill_process(env_gen)
-        sys.stdout.write('Killed env gen process\n')
         utils.save_agent(self)
         if log_interval:
             utils.log(self)

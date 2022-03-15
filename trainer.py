@@ -106,19 +106,11 @@ def main(raw_args):
     assert os.path.isdir(args.log_dir)
     assert ~args.no_PER^('lstm' in args.model.lower())  # can't have PER and LSTM together
 
-    envs = [utils.EnvWrapper(args.env, utils.ObsType[args.obs_type], utils.ActionType[args.action_type],
+    env = utils.EnvWrapper(args.env, utils.ObsType[args.obs_type], utils.ActionType[args.action_type],
             args.max_len, num_discrete=args.num_discrete, debug=args.debug, time_penalty=args.time_penalty,
                              frames_to_skip=args.frames_to_skip, use_history=args.use_history)
-            for _ in range(args.num_envs)]
-    env_gen = utils.AsyncEnvGen(envs, args.async_sleep_interval)
-    obs_shape = envs[0].obs_shape
-    num_actions = envs[0].num_actions
-
-    # TODO: async env with Retro does not work yet, for some reason env.start() does not start the process
-    #       and the program gets stuck in a loop. Don't forget to add both num_envs and async_env flags when testing
-    # env_gen = utils.AsyncRetroEnvGen(args)
-    # obs_size = 2120
-    # num_actions = 5
+    obs_shape = env.obs_shape
+    num_actions = env.num_actions
 
     if torch.cuda.is_available() and not args.no_cuda:
         device = torch.device('cuda')
@@ -144,10 +136,7 @@ def main(raw_args):
                                                            replay_max_len=args.replay_max_len)
 
     try:
-        if args.async_env:
-            env_gen.start()
-            sys.stdout.write('Started async env_gen process..\n')
-        agent.train(args.epochs, args.trajectory_len, env_gen, args.lr,
+        agent.train(args.epochs, args.trajectory_len, env, args.lr,
                     args.discount_gamma, args.scheduler_gamma, args.beta,
                     args.print_interval, args.log_interval, scheduler_interval=args.scheduler_interval,
                     clip_gradient=args.clip_gradient, no_per=args.no_PER, no_cuda=args.no_cuda,
@@ -158,11 +147,6 @@ def main(raw_args):
                     final_exp_time=args.final_exp_time, clip_loss=args.clip_loss)
     except Exception as e:
         raise e
-    finally:
-        utils.kill_process(env_gen)
-        if env_gen.is_alive():
-            env_gen.terminate()
-        sys.stdout.write('Killed env gen process\n')
 
 
 if __name__ == '__main__':

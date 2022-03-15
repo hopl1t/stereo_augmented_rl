@@ -172,21 +172,24 @@ def save_agent(agent):
     sys.stdout.write('Saved agent to {}\n'.format(agent.save_path))
 
 
-def log(agent):
+def log(agent, what_to_log=None):
+    if not what_to_log:
+        what_to_log = agent.log_buffer
     with open(agent.log_path, 'a') as f:
-        _ = f.writelines(agent.log_buffer)
+        _ = f.writelines(what_to_log)
         agent.log_buffer = []
     sys.stdout.write('Logged info to {}\n'.format(agent.log_path))
 
 
 def print_stats(agent, episode, print_interval, steps_count=0):
-    sys.stdout.write(
-        "eps: {}, stats for last {} eps:\tavg eps reward: {:.3f}\t\tavg eps step reward: {:.3f}\t\t"
-        "avg eps length: {:.3f}\t avg time: {:.3f}\n"
+    message = "eps: {}, stats for last {} eps:\tavg eps reward: {:.3f}\t\tavg eps step reward: {:.3f}\t\t" \
+              "avg eps length: {:.3f}\t avg time: {:.3f}\n"\
         .format(episode, print_interval, np.mean(agent.all_rewards[-print_interval:]),
                 np.sum(agent.all_rewards[-print_interval:]) / steps_count,
-                np.mean(agent.all_lengths[-print_interval:]) + 1,
-                np.mean(agent.all_times[-print_interval:])))
+                np.mean(agent.all_lengths[-print_interval:]) + 1,np.mean(agent.all_times[-print_interval:]))
+    sys.stdout.write(message)
+    sys.stdout.flush()
+    log(agent, message)
 
 
 def print_eval(all_episode_rewards, completed_levels):

@@ -30,7 +30,7 @@ class A2CAgent:
         self.traj_lengths = []
         self.is_lstm = any([isinstance(module, (LSTM, LSTMCell)) for module in model.modules()])
 
-    def train(self, epochs: int, trajectory_len: int, env_gen: utils.AsyncEnvGen, lr=1e-4,
+    def train(self, epochs: int, trajectory_len: int, env_wrapper: utils.EnvWrapper, lr=1e-4,
               discount_gamma=0.99, scheduler_gamma=0.98, beta=1e-3, print_interval=1000, log_interval=1000,
               save_interval=10000, scheduler_interval=1000, clip_gradient=False,
               eval_interval=0, device=torch.device('cpu'), **kwargs):
@@ -48,6 +48,7 @@ class A2CAgent:
         self.model.to(device)
         self.model.device = device
         self.model.train()
+        self.env = env_wrapper
         optimizer = optim.Adam(self.model.parameters(), lr=lr)
         scheduler = lr_scheduler.ExponentialLR(optimizer, gamma=scheduler_gamma)
         steps_count = 0
@@ -55,7 +56,7 @@ class A2CAgent:
         for episode in range(epochs):
             ep_start_time = time.time()
             episode_rewards = []
-            state, self.env = env_gen.get_reset_env()
+            state = self.env.reset()
             traj_log_probs, traj_values, traj_rewards = [], [], []
             traj_entropy_term = torch.zeros(1).to(device)
 
@@ -137,8 +138,6 @@ class A2CAgent:
                         break
 
         sys.stdout.write('-' * 10 + ' Finished training ' + '-' * 10 + '\n')
-        utils.kill_process(env_gen)
-        sys.stdout.write('Killed env gen process\n')
         utils.save_agent(self)
         if log_interval:
             utils.log(self)
