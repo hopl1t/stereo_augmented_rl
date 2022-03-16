@@ -124,7 +124,7 @@ def main(raw_args):
             agent = pickle.load(f)
             # In retro one cannot save the env and discretisizer, so we need to recreate them
             agent.env.env = retro.retro_env.RetroEnv
-            agent.env.discretisizer = Discretizer(envs[0].env, [['UP'], ['LEFT'], ['RIGHT'], ['BUTTON'], [None]])
+            agent.env.discretisizer = Discretizer(env.env, [['UP'], ['LEFT'], ['RIGHT'], ['BUTTON'], [None]])
     else:
         model = getattr(models, args.model)(obs_shape, num_actions, hidden_size=args.hidden_size,
                                             num_discrete=args.num_discrete, std_bias=args.std_bias, device=device,

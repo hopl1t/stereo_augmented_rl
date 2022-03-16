@@ -80,29 +80,32 @@ class ConvActorCritic(nn.Module):
         return value, policy_dist
 
 
-class NaiveSoundActorCritic(nn.Module):
+class SimpleMultiModalActorCritic(nn.Module):
     """
     Naive multimodal net that processes sound and video separately before concating into common layer
     Naive in the sense that no RNN is applied over time
     This net can take any naive multimodal input such as buffer, max volume or frequency + volume (Fourire).
     """
     def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), **kwargs):
-        super(NaiveSoundActorCritic, self).__init__()
+        super(SimpleMultiModalActorCritic, self).__init__()
         self.num_actions = num_actions
-        self.obs_shape = obs_shape
-        self.common_video_linear = nn.Linear(obs_shape[0], hidden_size)
-        self.common_audio_linear = nn.Linear(obs_shape[1], hidden_size // 4)
+        video_obs_shape = obs_shape[0][0] * obs_shape[0][1]
+        audio_obs_shape = obs_shape[1]
+        self.common_video_linear = nn.Linear(video_obs_shape, hidden_size)
+        self.common_audio_linear = nn.Linear(audio_obs_shape, hidden_size // 4)
         self.critic_linear = nn.Linear(hidden_size + hidden_size // 4, 1)
         self.actor_linear = nn.Linear(hidden_size + hidden_size // 4, num_actions)
         self.device = device
         utils.init_weights(self)
 
     def forward(self, state):
-        video_state = torch.from_numpy(state[0]).float().unsqueeze(0).to(self.device)
+        video_state = torch.from_numpy(state[0].flatten()).float().unsqueeze(0).to(self.device)
         audio_state = torch.from_numpy(state[1]).float().unsqueeze(0).to(self.device)
+        if audio_state.dim() == 1:  # This happens in VNC_MAX_MONO
+            audio_state = audio_state.unsqueeze(0)
         common_video = F.leaky_relu(self.common_video_linear(video_state))
         common_audio = F.leaky_relu(self.common_audio_linear(audio_state))
-        common = torch.cat((common_video, common_audio))
+        common = torch.cat((common_video, common_audio), axis=-1)
         value = self.critic_linear(common)
         policy_dist = F.softmax(self.actor_linear(common), dim=1)
         return value, policy_dist

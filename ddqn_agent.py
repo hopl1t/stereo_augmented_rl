@@ -80,11 +80,13 @@ class DDQNAgent:
         state = self.env.reset()
         frames = 0
         with torch.no_grad():
+            done = False
             while frames < replay_init_len:
                 frames += 1
-                done, state = self.train_step(state, epsilon, epsilon_bounded, discount_gamma)
                 if done:
-                    state = self.env.reset()
+                    done, state = self.env.reset()
+                else:
+                    done, state = self.train_step(state, epsilon, epsilon_bounded, discount_gamma)
         sys.stdout.write('Replay buffer initialized\n')
         sys.stdout.flush()
 

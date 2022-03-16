@@ -2,8 +2,10 @@ from enum import Enum, auto
 import time
 import multiprocessing as mp
 import torch
+from skimage.measure import block_reduce
 from torch.distributions import Categorical
 import numpy as np
+import librosa
 import sys
 import pickle
 # import gym_sokoban # Don't remove this
@@ -20,7 +22,10 @@ except ModuleNotFoundError as e:
     sys.stdout.write('Cannot import Monitor module, rendering won\'t be possible: {}\nContinuing..\n'.format(e))
     sys.stdout.flush()
 
+EPS = 1e-20
 OBS_BUFFER_LEN = 4
+SAMPLE_RATE = 32000
+AUDIO_BUFFER_SHAPE = (524, 2)
 
 class ObsType(Enum):
     GYM = auto()
@@ -30,7 +35,10 @@ class ObsType(Enum):
     VNC_BUFFER_STEREO = auto()
     VNC_MAX_MONO = auto()
     VNC_MAX_STEREO = auto()
-    VNC_FOURIER_STEREO = auto()
+    VNC_FFT_MONO = auto()
+    VNC_FFT_STEREO = auto()
+    VNC_MEL_MONO = auto()
+    VNC_MEL_STEREO = auto()
     VIDEO_CONV = auto()
     # TODO: Add RNN with the best of the naive types, and sound only with the best of the naive types
 
@@ -50,7 +58,7 @@ class MoveType(Enum):
     NONE = 4
 
 
-MAX_VOL = 2**14
+MAX_VOL = 2**14  # 16384
 AUDIO_BUFFER_SIZE = 524
 SPECTOGRAM_SIZE = 64
 
@@ -78,7 +86,7 @@ class PERDataSet():
             self.exp = high_delta + random.choices(low_delta, k=len(self.exp) // low_ratio)
 
     def sample(self, batch_size):
-        samples =  random.sample(self.exp, batch_size)
+        samples = random.sample(self.exp, batch_size)
         states_vid, states_aud, action_idxs, rewards, new_states_vid, new_states_aud, dones = [], [], [], [], [], [], []
         for sample in samples:
             states_vid.append(sample[0][0])
@@ -247,7 +255,7 @@ class EnvWrapper:
 
     def __init__(self, env_name, obs_type=ObsType.VIDEO_ONLY, action_type=ActionType.ACT_WAIT,
                  max_steps=5000, compression_rate=4, kill_hp_ratio=0.05, debug=False,
-                 time_penalty=0.005, use_history=False, **kwargs):
+                 time_penalty=0.005, use_history=False, audio_pooling=4, mel_bands=40, **kwargs):
         """
         Wraps a gym environment s.t. you can control it's input and output
         :param env_name: str, The environments name
@@ -270,6 +278,8 @@ class EnvWrapper:
         self.max_steps = max_steps
         self.action_type = action_type
         self.compression_rate = compression_rate
+        self.audio_poooling = audio_pooling
+        self.mel_bands = mel_bands
         if env_name == 'skeleton_plus':
             self.discretisizer = Discretizer(self.env, [['UP'], ['LEFT'], ['RIGHT'], ['BUTTON'], [None]])
         self.health = 99
@@ -297,8 +307,14 @@ class EnvWrapper:
             self.obs_shape = ((compressed_y_shape, compressed_x_shape), 1)
         elif obs_type == ObsType.VNC_MAX_STEREO:
             self.obs_shape = ((compressed_y_shape, compressed_x_shape), 2)
-        elif obs_type == ObsType.VNC_FOURIER_STEREO:
-            self.obs_shape = ((compressed_y_shape, compressed_x_shape), 4)  # frequency left + max vol, frequency right + max vol
+        elif obs_type == ObsType.VNC_FFT_MONO:
+            self.obs_shape = ((compressed_y_shape, compressed_x_shape), (AUDIO_BUFFER_SHAPE[0] // 2 + 1) // audio_pooling)
+        elif obs_type == ObsType.VNC_FFT_STEREO:
+            self.obs_shape = ((compressed_y_shape, compressed_x_shape), 2 * ((AUDIO_BUFFER_SHAPE[0] // 2 + 1) // audio_pooling))
+        elif obs_type == ObsType.VNC_MEL_MONO:
+            self.obs_shape = ((compressed_y_shape, compressed_x_shape), mel_bands)
+        elif obs_type == ObsType.VNC_MEL_STEREO:
+            self.obs_shape = ((compressed_y_shape, compressed_x_shape), 2 * mel_bands)
         elif obs_type == ObsType.GYM:
             self.obs_shape = ((obs_shape[0], 1), 1)
 
@@ -399,6 +415,33 @@ class EnvWrapper:
         """
         return np.interp(audio, [0, MAX_VOL], [-1, 1])
 
+    @staticmethod
+    def dB(y):
+        "Calculate the log ratio of y / max(y) in decibel."
+        y = np.abs(y) + EPS
+        y /= y.max()
+        return 20 * np.log10(y)
+
+    def get_spectrogram(self, buffer, spectrogram_type='fft', pooling=1):
+        samples_per_window = len(buffer)
+        frequencies = (samples_per_window // 2) + 1
+        if spectrogram_type.lower() == 'fft':
+            spectrum = np.abs(np.fft.fft(buffer, axis=0)[:frequencies:-1])  # the slicing is to let go of the 0 and the negative parts
+        elif spectrogram_type.lower() == 'fft_db':
+            spectrum = np.abs(np.fft.fft(buffer, axis=0)[:frequencies:-1])
+            spectrum = self.dB(spectrum)
+        elif spectrogram_type.lower() == 'mel':
+            # Buffer is transposed because in stereo libosa expects a shape of (#num_channels, #num_samples)
+            # librosa returns two bins because it uses stft (forces 2 windows) so we mean them. dim=-1 works for both mono and stereo
+            # for now I don't use pooling on MEL as it already doest the dimensionality reduction
+            mel_spectrogram = np.mean(librosa.feature.melspectrogram(y=buffer.T.astype(np.float16), sr=SAMPLE_RATE, n_fft=samples_per_window, n_mels=40), axis=-1)
+            return librosa.power_to_db(mel_spectrogram).flatten()
+        if spectrum.ndim == 1:
+            pool_mask = (pooling,)
+        else:
+            pool_mask = (pooling, 1)
+        return block_reduce(spectrum, pool_mask, np.max).flatten()
+
     def process_obs(self, obs):
         if self.obs_type == ObsType.VIDEO_ONLY:
             obs = (self.compress_obs(obs), np.zeros(SPECTOGRAM_SIZE))
@@ -427,10 +470,22 @@ class EnvWrapper:
             max_stereo = stereo.max(axis=0).astype(np.int16)
             max_stereo = self.normalize_sound(max_stereo)
             obs = (self.compress_obs(obs), max_stereo)
+        elif self.obs_type == ObsType.VNC_FFT_MONO:
+            stereo = self.env.em.get_audio()
+            mono = np.mean(stereo, axis=-1)
+            obs = (self.compress_obs(obs), self.get_spectrogram(mono, spectrogram_type='fft_db', pooling=self.audio_poooling))
+        elif self.obs_type == ObsType.VNC_FFT_STEREO:
+            stereo = self.env.em.get_audio()
+            obs = (self.compress_obs(obs), self.get_spectrogram(stereo, spectrogram_type='fft_db', pooling=self.audio_poooling))
+        elif self.obs_type == ObsType.VNC_MEL_MONO:
+            stereo = self.env.em.get_audio()
+            mono = np.mean(stereo, axis=-1)
+            obs = (self.compress_obs(obs), self.get_spectrogram(mono, spectrogram_type='mel'))
+        elif self.obs_type == ObsType.VNC_MEL_STEREO:
+            stereo = self.env.em.get_audio()
+            obs = (self.compress_obs(obs), self.get_spectrogram(stereo, spectrogram_type='mel'))
         elif self.obs_type == ObsType.GYM:
             obs = (obs, np.zeros(SPECTOGRAM_SIZE))
-        elif self.obs_type == ObsType.VNC_FOURIER_STEREO:
-            raise NotImplementedError
 
         if self.use_history:  # using OBS_BUFFER_LEN last observations as input as per https://web.stanford.edu/class/psych209/Readings/MnihEtAlHassibis15NatureControlDeepRL.pdf
             if len(self.obs_buffer) == 0:  # first run (after reset)

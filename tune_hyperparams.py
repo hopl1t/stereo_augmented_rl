@@ -1,7 +1,7 @@
 import gym
-from gym import logger as gymlogger
+# from gym import logger as gymlogger
 from gym.wrappers import Monitor
-gymlogger.set_level(40) # error only
+# gymlogger.set_level(40) # error only
 import numpy as np
 import random
 import math
@@ -31,7 +31,7 @@ TRAJ_LEN = 50000
 FINAL_EXP_TIME = 1000000
 BETA = 1e-3
 GAMMA = 0.99
-PRINT_INTERVAL = 100
+PRINT_INTERVAL = 10
 LOG_INTERVAL = 0
 SCHED_GAMMA = 0.95
 SCHED_INTERVAL = 100000
