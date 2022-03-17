@@ -2,6 +2,6 @@ obstypes=( VNC_MAX_MONO VNC_MAX_STEREO VNC_FFT_MONO VNC_FFT_STEREO VNC_MEL_MONO 
 for obstype in "${obstypes[@]}"
 do
     echo "Started experiment for $obstype"
-    nohup python experiment.py $obstype > "experiments_log/$obstype.txt" &
+    nohup python experiment.py $obstype > "experiments_log/$obstype.txt" 2>&1 &
 done
 

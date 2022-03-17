@@ -1,0 +1,13 @@
+Using CPU
+#################### VNC_MAX_MONO run 0 ####################/Users/nirweingarten/.pyenv/versions/anaconda3-5.3.1/lib/python3.7/site-packages/torch/nn/functional.py:718: UserWarning: Named tensors and all their associated APIs are an experimental feature and subject to change. Please do not use them for anything important until they are released as stable. (Triggered internally at  ../c10/core/TensorImpl.h:1156.)
+  return torch.max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
+Traceback (most recent call last):
+  File "experiment.py", line 90, in <module>
+    worker.run()
+  File "experiment.py", line 73, in run
+    final_exp_time=FINAL_EXP_TIME)
+  File "/Users/nirweingarten/Desktop/university/idc/thesis/git/a2c_agent.py", line 65, in train
+    value, policy_dist = self.model.forward(state)
+  File "/Users/nirweingarten/Desktop/university/idc/thesis/git/models.py", line 264, in forward
+    fuzed_features = torch.cat((video_features, audio_features), dim=-1)
+RuntimeError: torch.cat(): Tensors must have same number of dimensions: got 3 and 2

@@ -9,11 +9,11 @@ from datetime import datetime
 
 DEVICE = torch.device('cuda:3')
 # DEVICE = torch.device('cuda')
-DEVICE = torch.device('cpu')
+# DEVICE = torch.device('cpu')
 
 timestamp = datetime.now().strftime('%y%m%d%H%m%s')
 SAVE_DIR = '/home/nir/stereo_augmented_rl/saved_agents/experiment_{}'.format(timestamp)
-SAVE_DIR = '/users/nirweingarten/Desktop/tuning_{}'.format(timestamp)
+# SAVE_DIR = '/users/nirweingarten/Desktop/tuning_{}'.format(timestamp)
 # SAVE_DIR = '/content/drive/MyDrive/RL_research/skel_plus/saved_models/'
 if not os.path.exists(SAVE_DIR):
     os.makedirs(SAVE_DIR)
