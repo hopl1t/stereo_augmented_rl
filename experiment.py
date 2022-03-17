@@ -16,7 +16,11 @@ SAVE_DIR = '/home/nir/stereo_augmented_rl/saved_agents/experiment_{}'.format(tim
 # SAVE_DIR = '/users/nirweingarten/Desktop/tuning_{}'.format(timestamp)
 # SAVE_DIR = '/content/drive/MyDrive/RL_research/skel_plus/saved_models/'
 if not os.path.exists(SAVE_DIR):
-    os.makedirs(SAVE_DIR)
+    try:
+        os.makedirs(SAVE_DIR)
+    except FileExistsError:
+        sys.stdout.write('Directory already exists\n')
+        sys.stdout.flush()
 EPOCHS = 5000
 TRAJ_LEN = 50000
 FINAL_EXP_TIME = 1000000
