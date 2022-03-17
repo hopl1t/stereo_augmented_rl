@@ -257,7 +257,7 @@ class MultiModalCONVLSTMActorCritic(nn.Module):
     def forward(self, state):
         video_state = torch.from_numpy(state[0]).float().unsqueeze(0).unsqueeze(0).to(self.device)
         audio_state = torch.from_numpy(state[1]).float().unsqueeze(0).unsqueeze(0).to(self.device)
-        if audio_state.dim() == 1:  # This happens in VNC_MAX_MONO
+        if audio_state.dim() == 2:  # This happens in VNC_MAX_MONO
             audio_state = audio_state.unsqueeze(0)
         video_features = self.cnn(video_state).unsqueeze(0)
         audio_features = self.audio_linear(audio_state)
