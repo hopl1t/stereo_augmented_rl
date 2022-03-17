@@ -105,7 +105,7 @@ class SimpleMultiModalActorCritic(nn.Module):
             audio_state = audio_state.unsqueeze(0)
         common_video = F.leaky_relu(self.common_video_linear(video_state))
         common_audio = F.leaky_relu(self.common_audio_linear(audio_state))
-        common = torch.cat((common_video, common_audio), axis=-1)
+        common = torch.cat((common_video, common_audio), dim=-1)
         value = self.critic_linear(common)
         policy_dist = F.softmax(self.actor_linear(common), dim=1)
         return value, policy_dist
@@ -229,6 +229,48 @@ class CONVLSTMActorCritic(nn.Module):
     def reset_hidden(self):
         self.prev_hidden = init_hidden(self.num_lstm_layers, self.hidden_size, self.device)
 
+
+class MultiModalCONVLSTMActorCritic(nn.Module):
+    """
+    Convolutional multi-modal LTSM.
+    LSTM layer comes after the feature extraction from both modalities.
+    """
+    def __init__(self, obs_shape, num_actions, hidden_size=512, device=torch.device('cpu'), num_lstm_layers=2,
+                 kernels = (7, 4, 3), channels = (32, 64, 64), strides = (4, 2, 1), pools = (1, 1,1), **kwargs):
+        super(MultiModalCONVLSTMActorCritic, self).__init__()
+        self.prev_hidden = None
+        self.device = device
+        self.num_lstm_layers = num_lstm_layers
+        self.hidden_size = hidden_size
+        self.num_actions = num_actions
+        self.pools = pools
+        y_dim = obs_shape[0][0]
+        x_dim = obs_shape[0][1]
+        self.cnn = CNN(y_dim, x_dim, num_actions, (hidden_size // 4) * 3, device, kernels, channels, strides, pools)
+        self.audio_linear = nn.Linear(obs_shape[1], hidden_size // 4)
+        self.lstm = nn.LSTM(hidden_size, hidden_size, num_layers=num_lstm_layers, bidirectional=False)
+        self.reset_hidden()
+        self.critic_linear = nn.Linear(hidden_size, 1)
+        self.actor_linear = nn.Linear(hidden_size, num_actions)
+        utils.init_weights(self)
+
+    def forward(self, state):
+        video_state = torch.from_numpy(state[0]).float().unsqueeze(0).unsqueeze(0).to(self.device)
+        audio_state = torch.from_numpy(state[1]).float().unsqueeze(0).unsqueeze(0).to(self.device)
+        if audio_state.dim() == 1:  # This happens in VNC_MAX_MONO
+            audio_state = audio_state.unsqueeze(0)
+        video_features = self.cnn(video_state).unsqueeze(0)
+        audio_features = self.audio_linear(audio_state)
+        fuzed_features = torch.cat((video_features, audio_features), dim=-1)
+        lstm_out, lstm_hidden = self.lstm(fuzed_features, self.prev_hidden)
+        self.prev_hidden = lstm_hidden
+        lstm_out = lstm_out.squeeze(0)
+        value = self.critic_linear(lstm_out)
+        policy_dist = F.softmax(self.actor_linear(lstm_out), dim=1)
+        return value, policy_dist
+
+    def reset_hidden(self):
+        self.prev_hidden = init_hidden(self.num_lstm_layers, self.hidden_size, self.device)
 
 
 class LSTMDQN(nn.Module):
