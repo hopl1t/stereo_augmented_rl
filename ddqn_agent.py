@@ -18,6 +18,25 @@ from torch.nn.modules.rnn import LSTM
 # UPDATE_TARGET_INTERVAL = 100
 # BACKPROP_INTERVAL =  32
 
+timing = {
+            'reset_env': 0,
+            'train_step': 0,
+            'per': 0,
+            'sample': 0,
+            'compute_targets': 0,
+            'compute_predictions': 0,
+            'backprop': 0,
+            'update_target': 0,
+            'model_forward': 0,
+            'on_policy': 0,
+            'step': 0,
+            'target_model_forward': 0,
+            'off_policy': 0,
+            'get_delta': 0,
+            'replay_buffer_append': 0
+}
+time_stuff = False
+
 class DDQNAgent:
     """
     Double DQN Agent as per https://web.stanford.edu/class/psych209/Readings/MnihEtAlHassibis15NatureControlDeepRL.pdf,
@@ -84,7 +103,8 @@ class DDQNAgent:
             while frames < replay_init_len:
                 frames += 1
                 if done:
-                    done, state = self.env.reset()
+                    state = self.env.reset()
+                    done = False
                 else:
                     done, state = self.train_step(state, epsilon, epsilon_bounded, discount_gamma)
         sys.stdout.write('Replay buffer initialized\n')
@@ -94,28 +114,51 @@ class DDQNAgent:
         scheduler = lr_scheduler.ExponentialLR(optimizer, gamma=scheduler_gamma)
         steps_count = 0
 
+        global time_stuff
+        time_stuff = True
+
         for episode in range(epochs):
             ep_start_time = time.time()
             self.episode_rewards = []
+
+            start_time = time.time()
             state = self.env.reset()
+            timing['reset_env'] += time.time() - start_time
 
             for step in range(self.env.max_steps):
                 steps_count += 1
+
+                start_time = time.time()
                 done, state = self.train_step(state, epsilon, epsilon_bounded, discount_gamma)
+                timing['train_step'] += time.time() - start_time
+
                 if epsilon > epsilon_min:
                     epsilon -= eps_step
-                # if not (steps_count % update_target_interval):
-                #     self.target_model.load_state_dict(self.model.state_dict())
-                if done or ((not steps_count % backprop_interval) and steps_count != 0):
+                if (not (steps_count % backprop_interval)) and (steps_count != 0):
                     if not no_per:
+
+                        start_time = time.time()
                         self.replay_buffer.per()
+                        timing['per'] += time.time() - start_time
+
+                    start_time = time.time()
                     states, action_idxs, rewards, new_states, dones = self.replay_buffer.sample(batch_size)
+                    timing['sample'] += time.time() - start_time
+
                     with torch.no_grad():
                         new_qs = self.target_model(new_states)
                     off_policy = self.env.off_policy(new_qs).to(device)
+
+                    start_time = time.time()
                     targets = (rewards.to(device) + discount_gamma * off_policy * (1 - dones.int().to(device))).view(-1, 1)
+                    timing['compute_targets'] += time.time() - start_time
+
+                    start_time = time.time()
                     predictions = self.model(states).to(device)
                     predictions = torch.gather(predictions, -1, action_idxs.squeeze(-1).to(device))
+                    timing['compute_predictions'] += time.time() - start_time
+
+                    start_time = time.time()
                     self.model.train()
                     optimizer.zero_grad()
                     loss = F.mse_loss(predictions, targets.float())
@@ -124,45 +167,42 @@ class DDQNAgent:
                     loss.backward()
                     optimizer.step()
                     self.model.eval()
+                    timing['backprop'] += time.time() - start_time
 
                 if not (steps_count % update_target_interval) and (steps_count != 0):
+
+                    start_time = time.time()
                     self.target_model.load_state_dict(self.model.state_dict())
+                    timing['update_target'] += time.time() - start_time
 
                 if done:
                     break
 
-            if done:
-                self.all_times.append(time.time() - ep_start_time)
-                self.all_rewards.append(np.sum(self.episode_rewards))
-                self.all_lengths.append(step)
-                if np.mean(self.all_rewards[-100:]) >= 200:
-                    sys.stdout.write('{0} episode {1}, Last 100 train episodes averaged 200 points {0}\n'
-                                     .format('*' * 10, episode))
-                    utils.save_agent(self)
-                    return
-                if np.mean(self.all_rewards[-100:]) >= 200:
-                    sys.stdout.write('='*10, 'episode {}, Last 100 episodes averaged 200 points '.format(episode), '='*10)
-                    return
-                if (episode % print_interval == 0) and episode != 0:
-                    utils.print_stats(self, episode, print_interval, steps_count)
-                    steps_count = 0
-                if (episode % scheduler_interval == 0) and (episode != 0):
-                    scheduler.step()
-                    sys.stdout.write('stepped scheduler, new lr: {:.5f}\n'.format(scheduler.get_last_lr()[0]))
-                if (episode % save_interval == 0) and (episode != 0):
-                    utils.save_agent(self)
-                if log_interval and (episode % log_interval == 0) and (episode != 0):
-                    utils.log(self)
-                if eval_interval:
-                    if ((episode % eval_interval)  == 0 ) and (episode != 0):
-                        _, all_episode_rewards, completed_sokoban_levels = utils.evaluate(self, 100, render=False)
-                        utils.print_eval(all_episode_rewards, completed_sokoban_levels)
-                        if np.mean(all_episode_rewards) >= 200:
-                            sys.stdout.write('{0} episode {1}, Last 100 eval episodes averaged 200 points {0}\n'
-                                             .format('*' * 10, episode))
-                            utils.save_agent(self)
-                            return
-                sys.stdout.flush()
+            # Either done or max steps per episode reached
+            self.all_times.append(time.time() - ep_start_time)
+            self.all_rewards.append(np.sum(self.episode_rewards))
+            self.all_lengths.append(step)
+            if (episode % print_interval == 0) and (episode != 0):
+                utils.print_stats(self, episode, print_interval, step)
+                print(timing)
+            if (episode % scheduler_interval == 0) and (episode != 0):
+                scheduler.step()
+                sys.stdout.write('stepped scheduler, new lr: {:.5f}\n'.format(scheduler.get_last_lr()[0]))
+            if (episode % save_interval == 0) and (episode != 0):
+                utils.save_agent(self)
+            if log_interval and (episode % log_interval == 0) and (episode != 0):
+                utils.log(self)
+            if eval_interval:
+                if ((episode % eval_interval)  == 0 ) and (episode != 0):
+                    _, all_episode_rewards, completed_sokoban_levels = utils.evaluate(self, 100, render=False)
+                    utils.print_eval(all_episode_rewards, completed_sokoban_levels)
+                    if np.mean(all_episode_rewards) >= 200:
+                        sys.stdout.write('{0} episode {1}, Last 100 eval episodes averaged 200 points {0}\n'
+                                         .format('*' * 10, episode))
+                        utils.save_agent(self)
+                        return
+            sys.stdout.flush()
+
         sys.stdout.write('-' * 10 + ' Finished training ' + '-' * 10 + '\n')
         sys.stdout.flush()
         utils.save_agent(self)
@@ -207,14 +247,36 @@ class DDQNAgent:
         To enhance this wash-out (over randomness) lower the maximal buffer's length
         """
         with torch.no_grad():
+
+            start_time = time.time()
             q_vals = self.model.forward(state)
+            if time_stuff: timing['model_forward'] += time.time() - start_time
+
+            start_time = time.time()
             action, action_idx = self.env.on_policy(q_vals, epsilon, eps_bounded=epsilon_bounded)
+            if time_stuff: timing['on_policy'] += time.time() - start_time
+
+            start_time = time.time()
             new_state, reward, done, info = self.env.step(action)
+            if time_stuff: timing['step'] += time.time() - start_time
+
+            start_time = time.time()
             new_q_vals = self.target_model.forward(new_state).detach()
+            if time_stuff: timing['target_model_forward'] += time.time() - start_time
+
+            start_time = time.time()
             new_q = self.env.off_policy(new_q_vals)
+            if time_stuff: timing['off_policy'] += time.time() - start_time
+
+            start_time = time.time()
             target = (reward + discount_gamma * new_q).view(1, -1, 1)
             delta = self.get_delta(q_vals, action_idx, target)
+            if time_stuff: timing['get_delta'] += time.time() - start_time
+
+            start_time = time.time()
             self.replay_buffer.append((state, action_idx, reward, new_state, done, delta))
+            if time_stuff: timing['replay_buffer_append'] += time.time() - start_time
+
             self.episode_rewards.append(reward)
         return done, new_state
 

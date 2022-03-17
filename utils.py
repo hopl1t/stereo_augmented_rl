@@ -198,7 +198,7 @@ def print_stats(agent, episode, print_interval, steps_count=0):
               "avg eps length: {:.3f}\t avg time: {:.3f}\n"\
         .format(episode, print_interval, np.mean(agent.all_rewards[-print_interval:]),
                 np.sum(agent.all_rewards[-print_interval:]) / steps_count,
-                np.mean(agent.all_lengths[-print_interval:]) + 1,np.mean(agent.all_times[-print_interval:]))
+                np.mean(agent.all_lengths[-print_interval:]) + 1, np.mean(agent.all_times[-print_interval:]))
     sys.stdout.write(message)
     sys.stdout.flush()
     log(agent, message)

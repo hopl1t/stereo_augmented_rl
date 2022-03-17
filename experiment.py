@@ -21,7 +21,7 @@ if not os.path.exists(SAVE_DIR):
     except FileExistsError:
         sys.stdout.write('Directory already exists\n')
         sys.stdout.flush()
-EPOCHS = 5000
+EPOCHS = 4000
 TRAJ_LEN = 50000
 FINAL_EXP_TIME = 1000000
 BETA = 1e-3
@@ -32,8 +32,10 @@ SCHED_GAMMA = 0.95
 SCHED_INTERVAL = 100000
 MAX_STEPS = 1000000
 REPLAY_INIT_LEN = 50000
-LR = 0.00025
-HIDDEN_SIZE = 512
+SAVE_INTERVAL = 1000
+LR = 0.0001
+HIDDEN_SIZE = 256
+NUM_LSTM_LAYERS = 1
 FRAMES_TO_SKIP = 1
 USE_HISTORY = False
 EPSILON = 0
@@ -62,11 +64,11 @@ class ExperimentWorker():
             save_path = os.path.join(self.save_dir, agent_name)
             log_path = 'logs/{}.log'.format(agent_name)
             if obs_type in MULTIMODAL_OBS_TYPES:
-                model = MultiModalCONVLSTMActorCritic(self.env.obs_shape, self.env.num_actions, device=DEVICE, hidden_size=HIDDEN_SIZE)
+                model = MultiModalCONVLSTMActorCritic(self.env.obs_shape, self.env.num_actions, device=DEVICE, hidden_size=HIDDEN_SIZE, num_lstm_layers=NUM_LSTM_LAYERS)
                 sys.stdout.write('Chose multi-modal model\n')
                 sys.stdout.flush()
             else:
-                model = CONVLSTMActorCritic(self.env.obs_shape, self.env.num_actions, device=DEVICE, hidden_size=HIDDEN_SIZE)
+                model = CONVLSTMActorCritic(self.env.obs_shape, self.env.num_actions, device=DEVICE, hidden_size=HIDDEN_SIZE, num_lstm_layers=NUM_LSTM_LAYERS)
                 sys.stdout.write('Chose single-modal model\n')
                 sys.stdout.flush()
 
@@ -78,7 +80,7 @@ class ExperimentWorker():
                     lr=LR, discount_gamma=GAMMA, scheduler_gamma=SCHED_GAMMA, beta=BETA,
                     print_interval=PRINT_INTERVAL, log_interval=LOG_INTERVAL, scheduler_interval=SCHED_INTERVAL,
                     epsilon=EPSILON, batch_size=32, epsilon_min=0.1, device=DEVICE, replay_init_len=REPLAY_INIT_LEN,
-                    final_exp_time=FINAL_EXP_TIME)
+                    final_exp_time=FINAL_EXP_TIME, save_interval=SAVE_INTERVAL)
             utils.save_agent(agent)
             end = time.time()
             sys.stdout.write('----- training took {:.3f} minutes -----\n'.format((end - start)/60))
