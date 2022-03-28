@@ -63,10 +63,8 @@ AUDIO_BUFFER_SIZE = 524
 SPECTOGRAM_SIZE = 64
 
 
-# class PERDataSet(Dataset):
 class PERDataSet():
-    def __init__(self, max_len=100000, min_len=500):
-        super(PERDataSet, self).__init__()
+    def __init__(self, max_len=1000000, min_len=500):
         self.exp = []
         self.max_len = max_len
         self.min_len = min_len

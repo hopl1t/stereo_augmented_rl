@@ -21,7 +21,7 @@ if not os.path.exists(SAVE_DIR):
     except FileExistsError:
         sys.stdout.write('Directory already exists\n')
         sys.stdout.flush()
-EPOCHS = 4000
+EPOCHS = 3000
 TRAJ_LEN = 50000
 FINAL_EXP_TIME = 1000000
 BETA = 1e-3
@@ -32,7 +32,7 @@ SCHED_GAMMA = 0.95
 SCHED_INTERVAL = 100000
 MAX_STEPS = 1000000
 REPLAY_INIT_LEN = 50000
-SAVE_INTERVAL = 1000
+SAVE_INTERVAL = 100
 LR = 0.0001
 HIDDEN_SIZE = 256
 NUM_LSTM_LAYERS = 1
