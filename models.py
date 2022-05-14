@@ -4,6 +4,8 @@ import torch.nn.functional as F
 import utils
 
 
+DROPOUT_PROB = 0.1
+
 class CNN(nn.Module):
     def __init__(self, y_dim, x_dim, num_actions, hidden_size=512, device=torch.device('cpu'), kernels=(7,4,3),
                  channels=(32, 64, 64), strides=(4, 2, 1), pools=(1, 1, 1), **kwargs):
@@ -14,6 +16,7 @@ class CNN(nn.Module):
         self.conv1 = nn.Conv2d(1, channels[0], kernels[0], stride=strides[0])
         # output shape: (5, (y - 3 + 1) // 2 - 3 + 1, (x - 3 + 1) // 2 - 3 + 1), no pooling
         self.conv2 = nn.Conv2d(channels[0], channels[1], kernels[1], stride=strides[1])
+        self.dropout1 = nn.Dropout(p=DROPOUT_PROB)
         # output shape: (5, (y - 3 + 1) // 2 - 6 + 2, (x - 3 + 1) // 2 - 6 + 2),
         # after pooling (5, ((y - 3 + 1) // 2 - 6 + 2) // 2, ((x - 3 + 1) // 2 - 6 + 2) // 2)
         self.conv3 = nn.Conv2d(channels[1], channels[2], kernels[2], stride=strides[2])
@@ -26,6 +29,7 @@ class CNN(nn.Module):
     def forward(self, state):
         vid_feature = F.max_pool2d(F.relu(self.conv1(state)), self.pools[0])
         vid_feature = F.relu(self.conv2(vid_feature))
+        vid_feature = self.dropout1(vid_feature)
         vid_feature = F.max_pool2d(F.relu(self.conv3(vid_feature)), self.pools[2])
         # vid_feature = torch.flatten(vid_feature, start_dim=1)
         vid_feature = vid_feature.view(vid_feature.shape[0], -1)
@@ -247,8 +251,11 @@ class MultiModalCONVLSTMActorCritic(nn.Module):
         y_dim = obs_shape[0][0]
         x_dim = obs_shape[0][1]
         self.cnn = CNN(y_dim, x_dim, num_actions, (hidden_size // 4) * 3, device, kernels, channels, strides, pools)
+        self.video_dropout = nn.Dropout(p=DROPOUT_PROB)
         self.audio_linear = nn.Linear(obs_shape[1], hidden_size // 4)
+        self.audio_dropout = nn.Dropout(p=DROPOUT_PROB)
         self.lstm = nn.LSTM(hidden_size, hidden_size, num_layers=num_lstm_layers, bidirectional=False)
+        self.lstm_dropout = nn.Dropout(p=DROPOUT_PROB)
         self.reset_hidden()
         self.critic_linear = nn.Linear(hidden_size, 1)
         self.actor_linear = nn.Linear(hidden_size, num_actions)
@@ -260,11 +267,14 @@ class MultiModalCONVLSTMActorCritic(nn.Module):
         if audio_state.dim() == 2:  # This happens in VNC_MAX_MONO
             audio_state = audio_state.unsqueeze(0)
         video_features = self.cnn(video_state).unsqueeze(0)
-        audio_features = self.audio_linear(audio_state)
+        video_features = self.video_dropout(video_features)
+        audio_features = F.relu(self.audio_linear(audio_state))
+        audio_features = self.audio_dropout(audio_features)
         fuzed_features = torch.cat((video_features, audio_features), dim=-1)
         lstm_out, lstm_hidden = self.lstm(fuzed_features, self.prev_hidden)
         self.prev_hidden = lstm_hidden
         lstm_out = lstm_out.squeeze(0)
+        lstm_out = self.lstm_dropout(lstm_out)  # no need for more activation after LSTM
         value = self.critic_linear(lstm_out)
         policy_dist = F.softmax(self.actor_linear(lstm_out), dim=1)
         return value, policy_dist

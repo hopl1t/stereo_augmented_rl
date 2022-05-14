@@ -22,6 +22,8 @@ def main(raw_args):
         '-async_env', action='store_true', help='Flag. If present use async environment generation, else don\'t',
         default=False)
     parser.add_argument(
+        '-shape_reward', action='store_true', help='Flag. Apply reward shaping for fast games', default=False)
+    parser.add_argument(
         '-env', type=str, nargs='?', help='desired gym environment, example: "Pong-v0"')
     parser.add_argument(
         '-model', type=str, nargs='?', help='Model class name from models.py to use, example: "ModelClassName"')
@@ -108,7 +110,8 @@ def main(raw_args):
 
     env = utils.EnvWrapper(args.env, utils.ObsType[args.obs_type], utils.ActionType[args.action_type],
             args.max_len, num_discrete=args.num_discrete, debug=args.debug, time_penalty=args.time_penalty,
-                             frames_to_skip=args.frames_to_skip, use_history=args.use_history)
+                             frames_to_skip=args.frames_to_skip, use_history=args.use_history,
+                           shape_reward=args.shape_reward)
     obs_shape = env.obs_shape
     num_actions = env.num_actions
 

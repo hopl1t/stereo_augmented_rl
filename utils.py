@@ -192,10 +192,10 @@ def log(agent, what_to_log=None):
 
 
 def print_stats(agent, episode, print_interval, steps_count=0):
-    message = "eps: {}, stats for last {} eps:\tavg eps reward: {:.3f}\t\tavg eps step reward: {:.3f}\t\t" \
-              "avg eps length: {:.3f}\t avg time: {:.3f}\n"\
+    message = "eps: {0}, stats for last {1} eps:\tavg eps reward: {2:.3f}\t\tavg eps step reward: {3:.3f}\t\t" \
+              "episode score: {4:.3f}\t\tavg eps length: {5:.3f}\t avg time: {6:.3f}\n"\
         .format(episode, print_interval, np.mean(agent.all_rewards[-print_interval:]),
-                np.sum(agent.all_rewards[-print_interval:]) / steps_count,
+                np.sum(agent.all_rewards[-print_interval:]) / steps_count, agent.env.score,
                 np.mean(agent.all_lengths[-print_interval:]) + 1, np.mean(agent.all_times[-print_interval:]))
     sys.stdout.write(message)
     sys.stdout.flush()
@@ -246,6 +246,24 @@ def clone_model(model):
     return deepcopy(model)
 
 
+def shape_reward_func(score, time_from_last_score):
+    """
+    Run this in Desmos and get an idea on how this shaping looks like
+    time <= 250: reards = 5
+    time = 700: reward = 1.5
+    time = 1500: reward = 0.5
+    time >= 10k: reward = 0.1
+    I expect the agent to learn to kill in ~700 steps
+    """
+    if time_from_last_score <= 250:
+        multiplier = 5
+    elif time_from_last_score <= 4200:
+        multiplier = 0.2
+    else:
+        multiplier = 10000 / (time_from_last_score * np.log2(time_from_last_score))
+    return score * multiplier
+
+
 class EnvWrapper:
     """
     Wrapps a Sokoban gym environment s.t. we can use the room_state property instead of regular state
@@ -253,7 +271,7 @@ class EnvWrapper:
 
     def __init__(self, env_name, obs_type=ObsType.VIDEO_ONLY, action_type=ActionType.ACT_WAIT,
                  max_steps=5000, compression_rate=4, kill_hp_ratio=0.05, debug=False,
-                 time_penalty=0.005, use_history=False, audio_pooling=4, mel_bands=40, **kwargs):
+                 time_penalty=0.005, use_history=False, audio_pooling=4, mel_bands=40, shape_reward=False,  **kwargs):
         """
         Wraps a gym environment s.t. you can control it's input and output
         :param env_name: str, The environments name
@@ -282,12 +300,15 @@ class EnvWrapper:
             self.discretisizer = Discretizer(self.env, [['UP'], ['LEFT'], ['RIGHT'], ['BUTTON'], [None]])
         self.health = 99
         self.score = 0
+        # The rewards takes into account both the killed skeletons and the hp lost. hp penalties are muliplied by the kill_hp_ratio
+        self.shape_reward = shape_reward
         self.kill_hp_ratio = kill_hp_ratio
         self.debug = debug
         self.time_penalty = time_penalty
         self.frames_to_skip = kwargs.get('frames_to_skip', 1)
         self.use_history = use_history
         self.obs_buffer = []
+        self.steps_since_last_score = 0
         obs_shape = self.env.observation_space.shape
         if self.obs_type != ObsType.GYM:
             compressed_y_shape = (int(np.ceil(obs_shape[0] / self.compression_rate)))
@@ -369,6 +390,14 @@ class EnvWrapper:
             else:
                 self.health = health
                 self.score = score
+                # we shape the reward to encourage fast killings of the skeletons - the faster the kill the greater the reward
+                if self.shape_reward:
+                    if score_delta == 0:
+                        self.steps_since_last_score += 1
+                    else:  # score_delta > 0 ==> we've killed a skeleton
+                        score_delta = shape_reward_func(score, self.steps_since_last_score)
+                        self.steps_since_last_score = 0
+                # The rewards takes into account both the killed skeletons and the hp lost. hp penalties are muliplied by the kill_hp_ratio
                 reward = score_delta - (self.kill_hp_ratio * health_delta) - self.time_penalty
             if health < 10:
                 done = True

@@ -25,6 +25,7 @@ class A2CAgent:
         self.all_lengths = []
         self.average_lengths = []
         self.all_rewards = []
+        self.all_scores = []
         self.all_times = []
         self.log_buffer = []
         self.traj_lengths = []
@@ -110,6 +111,7 @@ class A2CAgent:
                     if done:
                         self.all_times.append(time.time() - ep_start_time)
                         self.all_rewards.append(np.sum(episode_rewards))
+                        self.all_scores.append(self.env.score)
                         self.all_lengths.append(step)
                         if np.mean(self.all_rewards[-100:]) >= 200:
                             sys.stdout.write('{0} episode {1}, Last 100 train episodes averaged 200 points {0}\n'
