@@ -193,9 +193,9 @@ def log(agent, what_to_log=None):
 
 def print_stats(agent, episode, print_interval, steps_count=0):
     message = "eps: {0}, stats for last {1} eps:\tavg eps reward: {2:.3f}\t\tavg eps step reward: {3:.3f}\t\t" \
-              "episode score: {4:.3f}\t\tavg eps length: {5:.3f}\t avg time: {6:.3f}\n"\
+              "avg episode score: {4:.3f}\t\tavg eps length: {5:.3f}\t avg time: {6:.3f}\n"\
         .format(episode, print_interval, np.mean(agent.all_rewards[-print_interval:]),
-                np.sum(agent.all_rewards[-print_interval:]) / steps_count, agent.env.score,
+                np.sum(agent.all_rewards[-print_interval:]) / steps_count, np.mean(agent.all_scores[-print_interval:]),
                 np.mean(agent.all_lengths[-print_interval:]) + 1, np.mean(agent.all_times[-print_interval:]))
     sys.stdout.write(message)
     sys.stdout.flush()
@@ -258,9 +258,9 @@ def shape_reward_func(score, time_from_last_score):
     if time_from_last_score <= 250:
         multiplier = 5
     elif time_from_last_score <= 4200:
-        multiplier = 0.2
-    else:
         multiplier = 10000 / (time_from_last_score * np.log2(time_from_last_score))
+    else:
+        multiplier = 0.2
     return score * multiplier
 
 
