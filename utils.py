@@ -16,11 +16,11 @@ import random
 import os
 import torch.nn.functional as F
 from torch.utils.data import Dataset
-try:
-    from gym.wrappers import Monitor
-except ModuleNotFoundError as e:
-    sys.stdout.write('Cannot import Monitor module, rendering won\'t be possible: {}\nContinuing..\n'.format(e))
-    sys.stdout.flush()
+# try:
+#     from gym.wrappers import Monitor
+# except ModuleNotFoundError as e:
+#     sys.stdout.write('Cannot import Monitor module, rendering won\'t be possible: {}\nContinuing..\n'.format(e))
+#     sys.stdout.flush()
 
 EPS = 1e-20
 OBS_BUFFER_LEN = 4

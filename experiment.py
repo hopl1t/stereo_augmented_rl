@@ -11,28 +11,28 @@ import pickle
 import retro
 from utils import Discretizer
 
-DEVICE = torch.device('cuda:3')
+DEVICE = torch.device('cuda')
 # DEVICE = torch.device('cuda')
 # DEVICE = torch.device('cpu')
 
 timestamp = datetime.now().strftime('%y%m%d%H%m%s')
-SAVE_DIR = '/home/nir/stereo_augmented_rl/saved_agents/experiment_{}'.format(timestamp)
+SAVE_DIR = '/home/ubuntu/stereo_augmented_rl/saved_agents/experiment_{}'.format(timestamp)
 # SAVE_DIR = '/users/nirweingarten/Desktop/tuning_{}'.format(timestamp)
 # SAVE_DIR = '/content/drive/MyDrive/RL_research/skel_plus/saved_models/experiment_{}'.format(timestamp)
 
-EPOCHS = 3000
+EPOCHS = 1500
 TRAJ_LEN = 50000
 FINAL_EXP_TIME = 1000000
 BETA = 1e-3
-GAMMA = 0.99
+GAMMA = 0.99125
 PRINT_INTERVAL = 10
 LOG_INTERVAL = 0
-SCHED_GAMMA = 0.95
-SCHED_INTERVAL = 100000
+SCHED_GAMMA = 0.93
+SCHED_INTERVAL = 100
 MAX_STEPS = 1000000
 REPLAY_INIT_LEN = 50000
 SAVE_INTERVAL = 100
-LR = 0.0001
+LR = 0.00015
 HIDDEN_SIZE = 256
 NUM_LSTM_LAYERS = 1
 FRAMES_TO_SKIP = 1
@@ -40,6 +40,8 @@ USE_HISTORY = False
 EPSILON = 0
 MULTIMODAL_OBS_TYPES = ['VNC_MAX_MONO', 'VNC_MAX_STEREO', 'VNC_FFT_MONO', 'VNC_FFT_STEREO', 'VNC_MEL_MONO', 'VNC_MEL_STEREO']
 VIDEO_ONLY_OBS_TYPES = ['VIDEO_ONLY', 'VIDEO_NO_CLUE']
+TIME_PENALTY = 0.0
+SHAPE_REWARD = False
 
 
 class ExperimentWorker():
@@ -55,7 +57,7 @@ class ExperimentWorker():
             os.mkdir(self.save_dir)
         self.env = utils.EnvWrapper('skeleton_plus', utils.ObsType[obs_type],
                                     utils.ActionType['ACT_WAIT'], max_steps=MAX_STEPS, num_discrete=10, debug=False,
-                                    time_penalty=0.0, frames_to_skip=FRAMES_TO_SKIP, use_history=USE_HISTORY)
+                                    time_penalty=TIME_PENALTY, frames_to_skip=FRAMES_TO_SKIP, use_history=USE_HISTORY, shape_reward=SHAPE_REWARD)
 
     def run(self, device):
         for run in range(self.num_runs):
