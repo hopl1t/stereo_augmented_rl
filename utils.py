@@ -16,11 +16,12 @@ import random
 import os
 import torch.nn.functional as F
 from torch.utils.data import Dataset
-# try:
-#     from gym.wrappers import Monitor
-# except ModuleNotFoundError as e:
-#     sys.stdout.write('Cannot import Monitor module, rendering won\'t be possible: {}\nContinuing..\n'.format(e))
-#     sys.stdout.flush()
+from scipy.io import wavfile
+try:
+    from gym.wrappers import Monitor
+except ModuleNotFoundError as e:
+    sys.stdout.write('Cannot import Monitor module, rendering won\'t be possible: {}\nContinuing..\n'.format(e))
+    sys.stdout.flush()
 
 EPS = 1e-20
 OBS_BUFFER_LEN = 4
@@ -214,6 +215,7 @@ def evaluate(agent, num_episodes=1, render=True):
     agent.model.eval()
     all_rewards = []
     all_episode_rewards = []
+    audio_buffer = []
     completed_levels = 0
     for epispode in range(num_episodes):
         if render:
@@ -222,12 +224,15 @@ def evaluate(agent, num_episodes=1, render=True):
             agent.env.env = Monitor(agent.env.env, './video', force=True)
         episode_rewards = []
         obs = agent.env.reset()
+        audio_buffer.append(agent.env.env.em.get_audio())
+        agent.model.reset_hidden()
         done = False
         while not done:
             with torch.no_grad():
                 level = agent.env.score // 10
                 action = agent.act(obs)
                 obs, reward, done, info = agent.env.step(action, is_eval=True)
+                audio_buffer.append(agent.env.env.em.get_audio())
             if (agent.env.score // 10) > level:
                     completed_levels += 1
             all_rewards.append(reward)
@@ -235,6 +240,9 @@ def evaluate(agent, num_episodes=1, render=True):
         all_episode_rewards.append(np.sum(episode_rewards))
     if render:
         agent.env.env.close()
+        sample = np.array(audio_buffer)
+        sample = sample.reshape((sample.shape[0] * sample.shape[1], 2))
+        wavfile.write('./video/sample.wav', 31400, sample)
     agent.model.train()
     return all_rewards, all_episode_rewards, completed_levels
 
